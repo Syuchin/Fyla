@@ -16,11 +16,24 @@ import { SettingsPage } from './pages/settings.jsx'
 import { HistoryPage } from './pages/history.jsx'
 
 export function App() {
+  function getCategoryFolder(ext) {
+    const e = ext.toLowerCase().replace('.', '')
+    if (['jpg','jpeg','png','heic','webp','tiff','gif','bmp','svg'].includes(e)) return 'Images'
+    if (['md','txt','docx','doc','rtf','pptx','xlsx','xls'].includes(e)) return 'Documents'
+    if (e === 'pdf') return 'PDFs'
+    if (['zip','rar','7z','tar','gz','bz2','xz'].includes(e)) return 'Archives'
+    return ''
+  }
+
   async function processFile(path, name) {
     const ext = name.includes('.') ? '.' + name.split('.').pop() : '.pdf'
     const id = Date.now() * 1000 + Math.floor(Math.random() * 1000000)
 
-    const defaultDest = config.value.defaultDestFolder || path.split('/').slice(0, -1).join('/')
+    let defaultDest = config.value.defaultDestFolder || path.split('/').slice(0, -1).join('/')
+    if (config.value.autoCategorize) {
+      const sub = getCategoryFolder(ext)
+      if (sub) defaultDest = defaultDest + '/' + sub
+    }
 
     pushConfirm({
       id, path, name, ext,
@@ -85,7 +98,7 @@ export function App() {
       const paths = JSON.parse(event.payload)
       const files = await scanPaths(paths, 1)
       for (const f of files) {
-        processFile(f.path, f.name + '.' + f.ext)
+        processFile(f.path, f.name)
       }
       currentPage.value = 'files'
     })
@@ -99,7 +112,7 @@ export function App() {
       if (!paths.length) return
       const files = await scanPaths(paths, 3)
       for (const f of files) {
-        processFile(f.path, f.name + '.' + f.ext)
+        processFile(f.path, f.name)
       }
     })
 
@@ -143,7 +156,7 @@ export function App() {
     if (!item || !item.newName) return
     const newFullName = item.newName + item.ext
     try {
-      const actualName = await moveAndRename(item.path, item.destFolder, newFullName, !!config.value.autoCategorize)
+      const actualName = await moveAndRename(item.path, item.destFolder, newFullName)
       const newPath = item.destFolder + '/' + actualName
       await addHistory({
         id: item.id,
