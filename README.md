@@ -15,7 +15,7 @@
     <a href="https://github.com/Syuchin/Fyla/issues">Report Bug</a>
   </p>
 
-  <img src="assets/Demonstration.gif" width="560" alt="Fyla Demo" />
+  <img src="assets/Demonstration.gif" width="480" alt="Fyla Demo" />
 </div>
 
 ## Features

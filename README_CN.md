@@ -15,7 +15,7 @@
     <a href="https://github.com/Syuchin/Fyla/issues">反馈问题</a>
   </p>
 
-  <img src="assets/Demonstration.gif" width="560" alt="Fyla 演示" />
+  <img src="assets/Demonstration.gif" width="480" alt="Fyla 演示" />
 </div>
 
 ## 功能
