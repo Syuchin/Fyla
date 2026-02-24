@@ -12,8 +12,12 @@ export function useAppShortcuts({ onConfirmAll, onUndo, onDismiss }) {
         return
       }
 
-      // Cmd+Z -> undo last rename (don't override existing behavior handled in app.jsx)
-      // This is a no-op here since app.jsx already handles Cmd+Z
+      // Cmd+Z -> undo last rename
+      if (isMeta && e.key === 'z') {
+        e.preventDefault()
+        onUndo?.()
+        return
+      }
 
       // Esc -> close confirm panel / clear selection
       if (e.key === 'Escape') {

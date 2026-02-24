@@ -45,6 +45,9 @@ fn style_description(naming_style: &str) -> &'static str {
         "Train-Case" => {
             "Train-Case：每个词首字母大写其余小写，连字符分隔。示例：Invoice-Acme-Corp-20240815"
         }
+        "chinese" => {
+            "中文命名：使用简体中文，类型与标题之间用连字符分隔。示例：发票-Acme公司合作协议20240815"
+        }
         _ => "kebab-case：全小写，连字符分隔。示例：invoice-acme-corp-20240815",
     }
 }
@@ -70,24 +73,28 @@ fn context_section(context: Option<&FileContext>) -> String {
     }
 }
 
-fn template_section(name_template: &str) -> String {
+fn template_section(name_template: &str, naming_style: &str) -> String {
     let effective = if name_template.trim().is_empty() {
         "{type}-{title}"
     } else {
         name_template.trim()
     };
+    let type_list = if naming_style == "chinese" {
+        "发票、收据、合同、报告、论文、简历、信函、手册、表单、证书、演示文稿、电子表格、照片、文档"
+    } else {
+        "Invoice, Receipt, Contract, Report, Paper, Resume, Letter, \
+        Manual, Form, Certificate, Presentation, Spreadsheet, Photo, Document"
+    };
     format!(
         "\n## 命名模板\n\
         按「{}」格式输出。变量替换规则：\n\
-        - {{type}} 从以下分类中选最匹配的一个：\
-        Invoice, Receipt, Contract, Report, Paper, Resume, Letter, \
-        Manual, Form, Certificate, Presentation, Spreadsheet, Photo, Document\n\
+        - {{type}} 从以下分类中选最匹配的一个：{}\n\
         - {{title}} 替换为文档标题/主题的关键词（2-5 个词）\n\
         - {{date}} 替换为文档日期（YYYYMMDD）\n\
         - {{author}} 替换为作者/发送方\n\
         - {{number}} 替换为文档编号\n\
         - 找不到的字段直接省略，不要留占位符\n",
-        effective
+        effective, type_list
     )
 }
 
@@ -106,15 +113,21 @@ fn build_prompt(text: &str, config: &AppConfig, context: Option<&FileContext>) -
         format!("\n\n## 用户自定义规则\n{}", config.custom_rules)
     };
 
-    let template = template_section(&config.name_template);
+    let template = template_section(&config.name_template, &config.naming_style);
     let ctx = context_section(context);
+
+    let abbr_rule = if config.naming_style == "chinese" {
+        "缩写词保持原样大写（例如 PDF、NASA）"
+    } else {
+        "缩写词也遵循同样规则（例如 FINCH → Finch, NASA → Nasa, PDF → Pdf）"
+    };
 
     format!(
         "你是一个文件命名助手。根据以下文件内容生成一个文件名（不含扩展名）。\n\n\
         ## 格式规则（严格遵守，这是唯一的格式标准）\n\
         - 命名风格：{style_desc}\n\
         - {date_hint}\n\
-        - 缩写词也遵循同样规则（例如 FINCH → Finch, NASA → Nasa, PDF → Pdf）\n\
+        - {abbr_rule}\n\
         - 只输出文件名本身，不要解释、不要加引号、不要加扩展名\n\
         - 不含空格和文件系统非法字符（/ \\ : * ? \" < > |）{custom}{template}\
         {ctx}\n\
@@ -385,15 +398,21 @@ fn build_vlm_prompt(config: &AppConfig, context: Option<&FileContext>) -> String
         format!("\n\n## 用户自定义规则\n{}", config.custom_rules)
     };
 
-    let template = template_section(&config.name_template);
+    let template = template_section(&config.name_template, &config.naming_style);
     let ctx = context_section(context);
+
+    let abbr_rule = if config.naming_style == "chinese" {
+        "缩写词保持原样大写（例如 PDF、NASA）"
+    } else {
+        "缩写词也遵循同样规则（例如 FINCH → Finch, NASA → Nasa, PDF → Pdf）"
+    };
 
     format!(
         "你是一个文件命名助手。根据这张图片的内容生成一个文件名（不含扩展名）。\n\n\
         ## 格式规则（严格遵守，这是唯一的格式标准）\n\
         - 命名风格：{style_desc}\n\
         - {date_hint}\n\
-        - 缩写词也遵循同样规则（例如 FINCH → Finch, NASA → Nasa, PDF → Pdf）\n\
+        - {abbr_rule}\n\
         - 只输出文件名本身，不要解释、不要加引号、不要加扩展名\n\
         - 不含空格和文件系统非法字符（/ \\ : * ? \" < > |）{custom}{template}\
         {ctx}"

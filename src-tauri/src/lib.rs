@@ -28,13 +28,19 @@ fn save_config(config: AppConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn scan_folder(path: String, extensions: String) -> Result<Vec<FileInfo>, String> {
-    renamer::scan_folder(&path, &extensions).map_err(|e| e.to_string())
+async fn scan_folder(path: String, extensions: String) -> Result<Vec<FileInfo>, String> {
+    renamer::scan_folder(&path, &extensions)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn extract_file_text(path: String) -> Result<String, String> {
-    extract_file_content_inner(&path).map_err(|e| e.to_string())
+async fn extract_file_text(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        extract_file_content_inner(&path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn extract_file_content_inner(path: &str) -> anyhow::Result<String> {
@@ -303,19 +309,25 @@ async fn generate_names_stream(
 }
 
 #[tauri::command]
-fn rename_files(tasks: Vec<RenameTask>) -> Vec<RenameResult> {
-    renamer::rename_files(&tasks)
+async fn rename_files(tasks: Vec<RenameTask>) -> Vec<RenameResult> {
+    tokio::task::spawn_blocking(move || renamer::rename_files(&tasks))
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-fn move_and_rename(
+async fn move_and_rename(
     src_path: String,
     dest_folder: String,
     new_name: String,
     auto_categorize: bool,
 ) -> Result<String, String> {
-    renamer::move_and_rename(&src_path, &dest_folder, &new_name, auto_categorize)
-        .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        renamer::move_and_rename(&src_path, &dest_folder, &new_name, auto_categorize)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

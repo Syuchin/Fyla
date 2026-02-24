@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tokio::fs as async_fs;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileInfo {
@@ -24,7 +25,8 @@ pub struct RenameResult {
 }
 
 /// Lists files in a folder, optionally filtered by comma-separated extensions.
-pub fn scan_folder(folder: &str, extensions: &str) -> Result<Vec<FileInfo>> {
+/// Uses async tokio I/O to avoid blocking the Tauri IPC thread.
+pub async fn scan_folder(folder: &str, extensions: &str) -> Result<Vec<FileInfo>> {
     let dir = Path::new(folder);
     let mut files = Vec::new();
     let exts: Vec<String> = extensions
@@ -33,24 +35,39 @@ pub fn scan_folder(folder: &str, extensions: &str) -> Result<Vec<FileInfo>> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file()
-            && let Some(ext) = path.extension()
-        {
-            let ext_lower = ext.to_ascii_lowercase().to_string_lossy().to_string();
-            if exts.is_empty() || exts.contains(&ext_lower) {
-                files.push(FileInfo {
-                    path: path.to_string_lossy().to_string(),
-                    name: path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                });
-            }
+    let mut read_dir = async_fs::read_dir(dir).await?;
+    while let Some(entry) = read_dir.next_entry().await? {
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+
+        // Skip hidden files early
+        if name_str.starts_with('.') {
+            continue;
         }
+
+        // Filter by extension BEFORE doing any metadata/stat call
+        let path = entry.path();
+        let ext_match = match path.extension() {
+            Some(ext) => {
+                let ext_lower = ext.to_ascii_lowercase().to_string_lossy().to_string();
+                exts.is_empty() || exts.contains(&ext_lower)
+            }
+            None => exts.is_empty(),
+        };
+        if !ext_match {
+            continue;
+        }
+
+        // Only now check if it's a file (this is the stat call)
+        let ft = entry.file_type().await?;
+        if !ft.is_file() {
+            continue;
+        }
+
+        files.push(FileInfo {
+            path: path.to_string_lossy().to_string(),
+            name: name_str.to_string(),
+        });
     }
 
     files.sort_by(|a, b| a.name.cmp(&b.name));

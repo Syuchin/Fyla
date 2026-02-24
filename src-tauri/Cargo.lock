@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "fyla"
-version = "1.0.3"
+version = "1.0.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1436,7 +1436,6 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "tokio",
- "walkdir",
  "window-vibrancy 0.7.1",
  "zip 2.4.2",
 ]

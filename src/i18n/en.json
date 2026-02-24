@@ -18,7 +18,36 @@
     "aiRename": "AI Rename",
     "cancel": "Cancel",
     "noFolder": "No folder selected",
-    "renamed": "Renamed"
+    "renamed": "Renamed",
+    "tooMany": "Too many files, loaded first {{max}} of {{total}}",
+    "analyzing": "Analyzing...",
+    "confirmRename": "Rename"
+  },
+  "welcome": {
+    "title": "Welcome to Fyla",
+    "subtitle": "AI-powered smart file renaming",
+    "step1Title": "Set up your AI model",
+    "step1Desc": "Works with local Ollama or any OpenAI-compatible API",
+    "step2Title": "File Organization",
+    "step2Desc": "Auto-categorize sorts renamed files into subfolders by type",
+    "step3Title": "Set up File Watching",
+    "step3Desc": "Fyla can auto-watch a folder and rename new files as they appear",
+    "step4Title": "Ready to Go",
+    "step4Desc": "All set! Drop files or wait for new files in your watch folder — Fyla will rename them automatically.",
+    "watchOptional": "This step is optional. You can configure it later in Settings.",
+    "prev": "Back",
+    "next": "Next",
+    "getStarted": "Get Started",
+    "skip": "Skip Guide"
+  },
+  "empty": {
+    "title": "Drop files here to rename",
+    "subtitle": "Supports PDF · Word · PPT · Excel · TXT · Markdown · JPG · PNG · HEIC · WebP · TIFF",
+    "stepDrop": "Drop files",
+    "stepAnalyze": "AI reads content",
+    "stepRename": "New filename",
+    "noApiHint": "No AI model configured",
+    "goSettings": "Go to Settings"
   },
   "history": {
     "title": "Rename History",
@@ -73,9 +102,6 @@
     "watchFolder": "Watch Folder",
     "watchFolderHint": "Auto-analyze new files (e.g. your Downloads folder)",
     "pick": "Pick",
-    "defaultDest": "Default Destination",
-    "defaultDestHint": "Move renamed files here. Leave empty to keep in place",
-    "keepInPlace": "Empty = keep in place",
     "autoCategorize": "Auto Categorize",
     "autoCategorizeHint": "Auto-sort files into subfolders by type (Images / Documents / PDFs / Archives)",
     "watchTypes": "File Types",
@@ -96,7 +122,8 @@
     "language": "Language",
     "languageHint": "Display language",
     "changelog": "Changelog",
-    "collapse": "Collapse"
+    "collapse": "Collapse",
+    "showGuide": "Show Welcome Guide"
   },
   "confirm": {
     "pending": "Pending Files",
@@ -106,7 +133,18 @@
     "confirm": "Confirm",
     "saveTo": "Save to",
     "pendingBadge": "{{count}} files pending",
-    "pendingLabel": "Pending"
+    "pendingLabel": "Pending",
+    "dismissAll": "Dismiss All"
+  },
+  "task": {
+    "extracting": "Extracting...",
+    "generating": "AI generating...",
+    "retry": "Retry",
+    "total": "files",
+    "processingLabel": "processing",
+    "readyLabel": "ready",
+    "doneLabel": "done",
+    "clearDone": "Clear Done"
   },
   "common": {
     "dropHint": "Drop files here",

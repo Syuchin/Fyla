@@ -1,6 +1,6 @@
 [package]
 name = "fyla"
-version = "1.0.3"
+version = "1.0.5"
 edition = "2024"
 
 [lib]
@@ -34,7 +34,6 @@ notify-debouncer-full = "0.6"
 window-vibrancy = "0.7.1"
 kamadak-exif = "0.5"
 base64 = "0.22"
-walkdir = "2"
 futures-util = "0.3"
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-updater = "2.10.0"

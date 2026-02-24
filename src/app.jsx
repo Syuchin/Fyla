@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'preact/hooks'
 import { listen } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   currentPage, toast, config,
-  isWatching, recentActivity, showToast,
-  confirmQueue, pushConfirm, updateConfirmById, removeConfirmById,
+  isWatching, recentActivity, showToast, showWelcome,
 } from './lib/store.js'
-import { getConfig, getHistory, extractFileText, generateFilename, moveAndRename, pickFolder, addHistory, undoRename, friendlyError, setBadgeCount, scanPaths } from './lib/tauri.js'
+import { tasks, stats, enqueueFile, confirmAll, dismissAll } from './lib/taskQueue.js'
+import { getConfig, getHistory, undoRename, friendlyError, setBadgeCount, scanPaths } from './lib/tauri.js'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { useAppShortcuts } from './lib/shortcuts.js'
 import { t, lang, toggleLang } from './lib/i18n.js'
@@ -14,56 +13,13 @@ import { checkForUpdate } from './lib/updater.js'
 import { FilesPage } from './pages/files.jsx'
 import { SettingsPage } from './pages/settings.jsx'
 import { HistoryPage } from './pages/history.jsx'
+import { WelcomeGuide, useOnboard } from './components/WelcomeGuide.jsx'
 
 export function App() {
-  function getCategoryFolder(ext) {
-    const e = ext.toLowerCase().replace('.', '')
-    if (['jpg','jpeg','png','heic','webp','tiff','gif','bmp','svg'].includes(e)) return 'Images'
-    if (['md','txt','docx','doc','rtf','pptx','xlsx','xls'].includes(e)) return 'Documents'
-    if (e === 'pdf') return 'PDFs'
-    if (['zip','rar','7z','tar','gz','bz2','xz'].includes(e)) return 'Archives'
-    return ''
-  }
-
-  async function processFile(path, name) {
-    const ext = name.includes('.') ? '.' + name.split('.').pop() : '.pdf'
-    const id = Date.now() * 1000 + Math.floor(Math.random() * 1000000)
-
-    let defaultDest = config.value.defaultDestFolder || path.split('/').slice(0, -1).join('/')
-    if (config.value.autoCategorize) {
-      const sub = getCategoryFolder(ext)
-      if (sub) defaultDest = defaultDest + '/' + sub
-    }
-
-    pushConfirm({
-      id, path, name, ext,
-      newName: '', destFolder: defaultDest,
-      status: 'analyzing', error: '',
-    })
-
-    try {
-      const text = await extractFileText(path)
-      let newName = await generateFilename(text, config.value, path)
-      // 兜底：如果后端返回的名字仍带后缀，在前端去掉
-      if (ext && newName.toLowerCase().endsWith(ext.toLowerCase())) {
-        newName = newName.slice(0, -ext.length)
-      }
-      confirmQueue.value = confirmQueue.value.map(item =>
-        item.id === id ? { ...item, newName, status: 'ready' } : item
-      )
-    } catch (e) {
-      confirmQueue.value = confirmQueue.value.map(item =>
-        item.id === id ? { ...item, status: 'error', error: friendlyError(e) } : item
-      )
-    }
-  }
+  const { onboardDone, finishOnboard } = useOnboard()
+  if (!onboardDone) showWelcome.value = true
 
   useEffect(() => {
-    isPermissionGranted().then(async (granted) => {
-      if (!granted) await requestPermission()
-    }).catch(() => {})
-
-    // Check for updates after a short delay
     setTimeout(checkForUpdate, 5000)
 
     getConfig().then(c => {
@@ -90,15 +46,19 @@ export function App() {
 
     const unlisten = listen('new-file', async (event) => {
       const { path, name } = event.payload
-      try { sendNotification({ title: t('common.newFileDetected'), body: name }) } catch (_) {}
-      processFile(path, name)
+      try {
+        let granted = await isPermissionGranted()
+        if (!granted) granted = (await requestPermission()) === 'granted'
+        if (granted) sendNotification({ title: t('common.newFileDetected'), body: name })
+      } catch (_) {}
+      enqueueFile(path, name, 'watch')
     })
 
     const unlistenFinderService = listen('finder-service-files', async (event) => {
       const paths = JSON.parse(event.payload)
       const files = await scanPaths(paths, 1)
       for (const f of files) {
-        processFile(f.path, f.name)
+        enqueueFile(f.path, f.name, 'finder')
       }
       currentPage.value = 'files'
     })
@@ -112,7 +72,7 @@ export function App() {
       if (!paths.length) return
       const files = await scanPaths(paths, 3)
       for (const f of files) {
-        processFile(f.path, f.name)
+        enqueueFile(f.path, f.name, 'drop')
       }
     })
 
@@ -125,79 +85,18 @@ export function App() {
     }
   }, [])
 
-  useEffect(() => {
-    function onKeyDown(e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-        const last = recentActivity.value[0]
-        if (last) {
-          e.preventDefault()
-          handleUndo(last.id)
-        }
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  })
-
   useAppShortcuts({
-    onConfirmAll: handleConfirmAll,
+    onConfirmAll: confirmAll,
     onUndo: () => {
       const last = recentActivity.value[0]
       if (last) handleUndo(last.id)
     },
     onDismiss: () => {
-      if (confirmQueue.value.length > 0) {
-        confirmQueue.value = []
+      if (tasks.value.length > 0) {
+        dismissAll()
       }
     },
   })
-
-  async function handleConfirmRename(item) {
-    if (!item || !item.newName) return
-    const newFullName = item.newName + item.ext
-    try {
-      const actualName = await moveAndRename(item.path, item.destFolder, newFullName)
-      const newPath = item.destFolder + '/' + actualName
-      await addHistory({
-        id: item.id,
-        originalPath: item.path,
-        originalName: item.name,
-        newPath,
-        newName: actualName,
-        timestamp: new Date().toISOString(),
-      })
-      recentActivity.value = [
-        { id: item.id, name: item.name, newName: actualName, newPath, dest: item.destFolder, time: new Date(), status: 'done' },
-        ...recentActivity.value,
-      ].slice(0, 200)
-      showToast(t('common.movedAndRenamed') + ': ' + actualName, 5000, item.id)
-      const visible = await getCurrentWindow().isVisible()
-      if (!visible) {
-        try { sendNotification({ title: 'Fyla', body: t('common.movedAndRenamed') + ': ' + actualName }) } catch (_) {}
-      }
-    } catch (e) {
-      showToast(t('common.operationFailed') + ': ' + friendlyError(e))
-    }
-    removeConfirmById(item.id)
-  }
-
-  function handleSkip(id) {
-    removeConfirmById(id)
-  }
-
-  async function handleConfirmAll() {
-    const readyItems = confirmQueue.value.filter(i => i.status === 'ready' && i.newName)
-    for (const item of readyItems) {
-      await handleConfirmRename(item)
-    }
-  }
-
-  async function handlePickDest(id) {
-    const folder = await pickFolder()
-    if (folder) {
-      updateConfirmById(id, { destFolder: folder })
-    }
-  }
 
   async function handleUndo(id) {
     try {
@@ -209,12 +108,21 @@ export function App() {
     }
   }
 
-  const queue = confirmQueue.value
+  function renderPage(page) {
+    switch (page) {
+      case 'history':  return <HistoryPage />
+      case 'settings': return <SettingsPage />
+      default:         return <FilesPage />
+    }
+  }
+
   const [dragOver, setDragOver] = useState(false)
+  const { ready, processing } = stats.value
+  const pendingCount = ready + processing
 
   useEffect(() => {
-    setBadgeCount(queue.length).catch(() => {})
-  }, [queue.length])
+    setBadgeCount(pendingCount).catch(() => {})
+  }, [pendingCount])
 
   return (
     <div id="app">
@@ -254,9 +162,9 @@ export function App() {
           data-tauri-drag-region
         />
         <div class="titlebar-right">
-          {queue.length > 0 && (
-            <div class="pending-badge" title={t('confirm.pendingBadge', { count: queue.length })} onClick={() => currentPage.value = 'files'}>
-              <span class="pending-count">{queue.length}</span>
+          {pendingCount > 0 && (
+            <div class="pending-badge" title={t('confirm.pendingBadge', { count: pendingCount })} onClick={() => currentPage.value = 'files'}>
+              <span class="pending-count">{pendingCount}</span>
               <span class="pending-text">{t('confirm.pendingLabel')}</span>
             </div>
           )}
@@ -266,64 +174,18 @@ export function App() {
               <span class="watch-text">{t('common.monitoring')}</span>
             </div>
           )}
-          <button class="lang-toggle" onClick={toggleLang}>
-            {lang.value === 'zh' ? 'EN' : '中文'}
+          <button class="lang-toggle" onClick={toggleLang} title={lang.value === 'zh' ? 'English' : '中文'}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10A15.3 15.3 0 0112 2z"/>
+            </svg>
           </button>
         </div>
       </div>
 
       <div class="page-content">
-        {currentPage.value === 'files' ? <FilesPage /> : currentPage.value === 'history' ? <HistoryPage /> : <SettingsPage />}
+        {renderPage(currentPage.value)}
       </div>
-
-      {queue.length > 0 && (
-        <div class="confirm-panel">
-          <div class="confirm-panel-header">
-            <span>{t('confirm.pending')} ({queue.length})</span>
-            {queue.filter(i => i.status === 'ready' && i.newName).length > 1 && (
-              <button class="btn btn-primary btn-sm" onClick={handleConfirmAll}>{t('confirm.confirmAll')}</button>
-            )}
-          </div>
-          <div class="confirm-panel-list">
-            {queue.map(item => (
-              <div class={`confirm-item confirm-item--${item.status}`} key={item.id}>
-                <div class="confirm-item-name">{item.name}</div>
-                {item.status === 'analyzing' && (
-                  <div class="confirm-item-status">{t('confirm.analyzing')}</div>
-                )}
-                {item.status === 'ready' && (
-                  <div class="confirm-item-detail">
-                    <div class="confirm-item-row">
-                      <input
-                        class="confirm-input"
-                        data-file-input
-                        value={item.newName}
-                        onInput={e => updateConfirmById(item.id, { newName: e.target.value })}
-                      />
-                      <span class="confirm-ext">{item.ext}</span>
-                    </div>
-                    <div class="confirm-item-row">
-                      <span class="confirm-dest-label">{t('confirm.saveTo')}</span>
-                      <button class="confirm-dest-btn" onClick={() => handlePickDest(item.id)}>
-                        {item.destFolder.split('/').pop() || item.destFolder}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {item.status === 'error' && (
-                  <div class="confirm-item-error">{item.error}</div>
-                )}
-                <div class="confirm-item-actions">
-                  <button class="btn btn-secondary btn-sm" onClick={() => handleSkip(item.id)}>{t('confirm.skip')}</button>
-                  {item.status === 'ready' && item.newName && (
-                    <button class="btn btn-primary btn-sm" onClick={() => handleConfirmRename(item)}>{t('confirm.confirm')}</button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {toast.value && (
         <div class="toast">
@@ -332,6 +194,10 @@ export function App() {
             <button class="toast-undo" onClick={() => handleUndo(toast.value.undoId)}>{t('history.undo')}</button>
           )}
         </div>
+      )}
+
+      {showWelcome.value && (
+        <WelcomeGuide onDone={() => { finishOnboard(); showWelcome.value = false }} />
       )}
     </div>
   )

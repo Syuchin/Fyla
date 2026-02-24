@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks'
-import { config, showToast, isWatching } from '../lib/store.js'
+import { config, showToast, isWatching, showWelcome } from '../lib/store.js'
 import { saveConfig, startWatch, stopWatch, pickFolder, testConnection } from '../lib/tauri.js'
 import { invoke } from '@tauri-apps/api/core'
 import { changelog } from '../lib/changelog.js'
@@ -39,6 +39,47 @@ export function SettingsPage() {
     <div class="main">
       <div class="settings-page">
 
+        {/* General */}
+        <div class="settings-section">
+          <div class="settings-section-title">{t('settings.general')}</div>
+          <div class="settings-row">
+            <span class="settings-label">
+              {t('settings.language')}
+              <small>{t('settings.languageHint')}</small>
+            </span>
+            <select class="settings-select" value={lang.value} onChange={e => setLang(e.target.value)}>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">
+              {t('settings.autostart')}
+              <small>{t('settings.autostartHint')}</small>
+            </span>
+            <label class="switch">
+              <input
+                type="checkbox"
+                checked={autoStart}
+                onChange={async (e) => {
+                  try {
+                    await invoke('set_autostart', { enabled: e.target.checked })
+                    setAutoStart(e.target.checked)
+                  } catch (err) {
+                    showToast(t('settings.setFailed') + ': ' + err)
+                  }
+                }}
+              />
+              <span class="switch-slider" />
+            </label>
+          </div>
+          <div class="settings-row" style="justify-content:flex-end">
+            <button class="btn btn-ghost" style="font-size:12px" onClick={() => { showWelcome.value = true }}>
+              {t('settings.showGuide')}
+            </button>
+          </div>
+        </div>
+
         {/* AI Provider */}
         <div class="settings-section">
           <div class="settings-section-title">{t('settings.aiProvider')}</div>
@@ -59,106 +100,91 @@ export function SettingsPage() {
               </button>
             </div>
           </div>
+
+          {c.provider === 'ollama' ? (
+            <>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.serverUrl')}
+                  <small>{t('settings.serverUrlHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.ollamaUrl}
+                  onInput={e => update('ollamaUrl', e.target.value)}
+                  placeholder="http://localhost:11434"
+                />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.modelName')}
+                  <small>{t('settings.modelNameHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.ollamaModel}
+                  onInput={e => update('ollamaModel', e.target.value)}
+                  placeholder="llama3.2"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.baseUrl')}
+                  <small>{t('settings.baseUrlHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.openaiBaseUrl}
+                  onInput={e => update('openaiBaseUrl', e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.apiKey')}
+                  <small>Bearer Token</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="password"
+                  value={c.openaiKey}
+                  onInput={e => update('openaiKey', e.target.value)}
+                  placeholder="sk-..."
+                />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.model')}
+                  <small>{t('settings.modelHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.openaiModel}
+                  onInput={e => update('openaiModel', e.target.value)}
+                  placeholder="gpt-4o-mini"
+                />
+              </div>
+            </>
+          )}
+
+          <div class="settings-row" style="justify-content:flex-end">
+            <button class="btn btn-secondary" style="font-size:12px" disabled={testing} onClick={handleTestConnection}>
+              {testing ? t('settings.testing') : t('settings.testConnection')}
+            </button>
+            {testResult && (
+              <span style={`font-size:12px;margin-left:8px;color:${testResult.ok ? 'var(--success)' : 'var(--danger)'}`}>
+                {testResult.msg}
+              </span>
+            )}
+          </div>
         </div>
-
-        {/* Ollama Config */}
-        {c.provider === 'ollama' && (
-          <div class="settings-section">
-            <div class="settings-section-title">{t('settings.ollamaConfig')}</div>
-            <div class="settings-row">
-              <span class="settings-label">
-                {t('settings.serverUrl')}
-                <small>{t('settings.serverUrlHint')}</small>
-              </span>
-              <input
-                class="settings-input"
-                type="text"
-                value={c.ollamaUrl}
-                onInput={e => update('ollamaUrl', e.target.value)}
-                placeholder="http://localhost:11434"
-              />
-            </div>
-            <div class="settings-row">
-              <span class="settings-label">
-                {t('settings.modelName')}
-                <small>{t('settings.modelNameHint')}</small>
-              </span>
-              <input
-                class="settings-input"
-                type="text"
-                value={c.ollamaModel}
-                onInput={e => update('ollamaModel', e.target.value)}
-                placeholder="llama3.2"
-              />
-            </div>
-            <div class="settings-row" style="justify-content:flex-end">
-              <button class="btn btn-secondary" style="font-size:12px" disabled={testing} onClick={handleTestConnection}>
-                {testing ? t('settings.testing') : t('settings.testConnection')}
-              </button>
-              {testResult && (
-                <span style={`font-size:12px;margin-left:8px;color:${testResult.ok ? 'var(--success)' : 'var(--danger)'}`}>
-                  {testResult.msg}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* OpenAI Compatible API */}
-        {c.provider === 'openai' && (
-          <div class="settings-section">
-            <div class="settings-section-title">{t('settings.openaiConfig')}</div>
-            <div class="settings-row">
-              <span class="settings-label">
-                {t('settings.baseUrl')}
-                <small>{t('settings.baseUrlHint')}</small>
-              </span>
-              <input
-                class="settings-input"
-                type="text"
-                value={c.openaiBaseUrl}
-                onInput={e => update('openaiBaseUrl', e.target.value)}
-                placeholder="https://api.openai.com/v1"
-              />
-            </div>
-            <div class="settings-row">
-              <span class="settings-label">
-                {t('settings.apiKey')}
-                <small>Bearer Token</small>
-              </span>
-              <input
-                class="settings-input"
-                type="password"
-                value={c.openaiKey}
-                onInput={e => update('openaiKey', e.target.value)}
-                placeholder="sk-..."
-              />
-            </div>
-            <div class="settings-row">
-              <span class="settings-label">
-                {t('settings.model')}
-                <small>{t('settings.modelHint')}</small>
-              </span>
-              <input
-                class="settings-input"
-                type="text"
-                value={c.openaiModel}
-                onInput={e => update('openaiModel', e.target.value)}
-                placeholder="gpt-4o-mini"
-              />
-            </div>
-            <div class="settings-row" style="justify-content:flex-end">
-              <button class="btn btn-secondary" style="font-size:12px" disabled={testing} onClick={handleTestConnection}>
-                {testing ? t('settings.testing') : t('settings.testConnection')}
-              </button>
-              {testResult && (
-                <span style={`font-size:12px;margin-left:8px;color:${testResult.ok ? 'var(--success)' : 'var(--danger)'}`}>
-                  {testResult.msg}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Naming Rules */}
         <div class="settings-section">
@@ -175,6 +201,7 @@ export function SettingsPage() {
                 ['snake_case', 'snake_case'],
                 ['camelCase', 'camelCase'],
                 ['PascalCase', 'PascalCase'],
+                ['chinese', '中文'],
               ].map(([val, label]) => (
                 <button
                   key={val}
@@ -334,34 +361,12 @@ export function SettingsPage() {
           </div>
           <div class="settings-row">
             <span class="settings-label">
-              {t('settings.defaultDest')}
-              <small>{t('settings.defaultDestHint')}</small>
-            </span>
-            <div style="display:flex;gap:6px;align-items:center">
-              <input
-                class="settings-input"
-                type="text"
-                value={c.defaultDestFolder}
-                onInput={e => update('defaultDestFolder', e.target.value)}
-                placeholder={t('settings.keepInPlace')}
-                style="max-width:200px"
-              />
-              <button class="btn btn-secondary" style="padding:6px 8px" onClick={async () => {
-                const path = await pickFolder()
-                if (path) update('defaultDestFolder', path)
-              }}>
-                {t('settings.pick')}
-              </button>
-            </div>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">
               {t('settings.autoCategorize')}
               <small>{t('settings.autoCategorizeHint')}</small>
             </span>
-            <label class="toggle">
+            <label class="switch">
               <input type="checkbox" checked={c.autoCategorize} onChange={e => update('autoCategorize', e.target.checked)} />
-              <span class="toggle-slider" />
+              <span class="switch-slider" />
             </label>
           </div>
           <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
@@ -418,42 +423,6 @@ export function SettingsPage() {
                 {t('settings.startWatch')}
               </button>
             )}
-          </div>
-        </div>
-
-        {/* General */}
-        <div class="settings-section">
-          <div class="settings-section-title">{t('settings.general')}</div>
-          <div class="settings-row">
-            <span class="settings-label">
-              {t('settings.autostart')}
-              <small>{t('settings.autostartHint')}</small>
-            </span>
-            <label class="switch">
-              <input
-                type="checkbox"
-                checked={autoStart}
-                onChange={async (e) => {
-                  try {
-                    await invoke('set_autostart', { enabled: e.target.checked })
-                    setAutoStart(e.target.checked)
-                  } catch (err) {
-                    showToast(t('settings.setFailed') + ': ' + err)
-                  }
-                }}
-              />
-              <span class="switch-slider" />
-            </label>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">
-              {t('settings.language')}
-              <small>{t('settings.languageHint')}</small>
-            </span>
-            <select class="settings-select" value={lang.value} onChange={e => setLang(e.target.value)}>
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-            </select>
           </div>
         </div>
 
