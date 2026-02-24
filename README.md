@@ -1,10 +1,22 @@
-# Fyla
+<div align="center">
+  <img src="assets/title.png" height="80" alt="Fyla" />
+  <p><strong>Smart file renaming, powered by AI.</strong><br>Drag files in, get meaningful names out.</p>
 
-AI-powered file renaming for macOS. Drag files in, get meaningful names out.
+  <p>
+    <a href="https://github.com/Syuchin/Fyla/releases"><img src="https://img.shields.io/github/v/release/Syuchin/Fyla?style=flat-square&color=00c853" alt="Release" /></a>
+    <a href="https://github.com/Syuchin/Fyla/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License" /></a>
+    <a href="https://github.com/Syuchin/Fyla"><img src="https://img.shields.io/github/stars/Syuchin/Fyla?style=flat-square" alt="Stars" /></a>
+    <a href="https://github.com/Syuchin/Fyla/releases"><img src="https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey?style=flat-square" alt="Platform" /></a>
+  </p>
 
-[中文](README_CN.md)
+  <p>
+    <a href="./README_CN.md">中文</a> ·
+    <a href="https://github.com/Syuchin/Fyla/releases">Download</a> ·
+    <a href="https://github.com/Syuchin/Fyla/issues">Report Bug</a>
+  </p>
 
-![Fyla](overview.png)
+  <img src="assets/Demonstration.gif" width="680" alt="Fyla Demo" />
+</div>
 
 ## Features
 
