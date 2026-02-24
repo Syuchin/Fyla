@@ -29,8 +29,13 @@ export async function checkForUpdateManual(setChecking) {
     await update.downloadAndInstall()
     showToast(t('updater.ready'))
     setTimeout(() => relaunch(), 2000)
-  } catch (_) {
-    showToast(t('updater.checkFailed'))
+  } catch (e) {
+    const msg = String(e?.message || e || '')
+    if (msg.includes('404') || msg.includes('Not Found') || msg.includes('status code')) {
+      showToast(t('updater.upToDate'))
+    } else {
+      showToast(t('updater.checkFailed'))
+    }
   }
   setChecking(false)
 }

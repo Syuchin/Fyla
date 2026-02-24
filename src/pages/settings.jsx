@@ -449,12 +449,12 @@ export function SettingsPage() {
 
         {/* About */}
         <div class="settings-section about-section">
-          <div class="about-version" onClick={() => setShowChangelog(!showChangelog)}>
-            <span>Fyla v{changelog[0].version}</span>
-            <span class="about-toggle">{showChangelog ? t('settings.collapse') : t('settings.changelog')}</span>
-          </div>
-          <div class="settings-row" style="justify-content:flex-end;padding:4px 0">
-            <button class="btn btn-secondary" style="font-size:12px" disabled={checking} onClick={() => checkForUpdateManual(setChecking)}>
+          <div class="about-version">
+            <span class="about-version-left" onClick={() => setShowChangelog(!showChangelog)}>
+              <span>Fyla v{changelog[0].version}</span>
+              <span class="about-toggle">{showChangelog ? t('settings.collapse') : t('settings.changelog')}</span>
+            </span>
+            <button class="btn btn-secondary about-update-btn" disabled={checking} onClick={() => checkForUpdateManual(setChecking)}>
               {checking ? t('updater.checking') : t('updater.checkUpdate')}
             </button>
           </div>

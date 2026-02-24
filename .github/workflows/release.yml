@@ -32,5 +32,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Fyla ${{ github.ref_name }}'
           releaseBody: 'See [CHANGELOG.md](https://github.com/Syuchin/Fyla/blob/main/CHANGELOG.md) for details.'
-          releaseDraft: true
+          releaseDraft: false
+          prerelease: false
           args: --target universal-apple-darwin
