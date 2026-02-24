@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Fyla 需要访问文件夹以读取和重命名文件</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Fyla 需要访问桌面文件夹</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Fyla 需要访问下载文件夹以监听新文件</string>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>用 Fyla 重命名</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>handleFilesFromFinder</string>
+            <key>NSPortName</key>
+            <string>Fyla</string>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.item</string>
+            </array>
+            <key>NSRequiredContext</key>
+            <dict/>
+        </dict>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,48 @@
+[package]
+name = "fyla"
+version = "1.0.0"
+edition = "2024"
+
+[lib]
+name = "fyla_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+cc = "1"
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+pdf-extract = "0.10"
+zip = "2"
+calamine = "0.33"
+quick-xml = "0.37"
+anyhow = "1"
+dirs = "5"
+libc = "0.2"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+notify-debouncer-full = "0.6"
+window-vibrancy = "0.7.1"
+kamadak-exif = "0.5"
+base64 = "0.22"
+walkdir = "2"
+futures-util = "0.3"
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-updater = "2.10.0"
+tauri-plugin-process = "2.3.1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
