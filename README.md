@@ -16,6 +16,8 @@
   </p>
 
   <img src="assets/Demonstration.gif" width="680" alt="Fyla Demo" />
+  <br><br>
+  <img src="assets/overview.png" width="680" alt="Fyla Overview" />
 </div>
 
 ## Features
