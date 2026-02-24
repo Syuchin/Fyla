@@ -39,8 +39,8 @@ export async function renameFiles(tasks) {
   return await invoke('rename_files', { tasks })
 }
 
-export async function moveAndRename(srcPath, destFolder, newName) {
-  return await invoke('move_and_rename', { srcPath, destFolder, newName })
+export async function moveAndRename(srcPath, destFolder, newName, autoCategorize = false) {
+  return await invoke('move_and_rename', { srcPath, destFolder, newName, autoCategorize })
 }
 
 export async function getConfig() {

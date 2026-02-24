@@ -76,6 +76,8 @@
     "defaultDest": "Default Destination",
     "defaultDestHint": "Move renamed files here. Leave empty to keep in place",
     "keepInPlace": "Empty = keep in place",
+    "autoCategorize": "Auto Categorize",
+    "autoCategorizeHint": "Auto-sort files into subfolders by type (Images / Documents / PDFs / Archives)",
     "watchTypes": "File Types",
     "watchTypesHint": "Select formats to auto-process",
     "enableWatch": "Enable Watch",
@@ -102,6 +104,7 @@
     "analyzing": "Analyzing...",
     "skip": "Skip",
     "confirm": "Confirm",
+    "saveTo": "Save to",
     "pendingBadge": "{{count}} files pending",
     "pendingLabel": "Pending"
   },

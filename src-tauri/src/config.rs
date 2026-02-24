@@ -22,6 +22,7 @@ pub struct AppConfig {
     pub watch_extensions: String,
     pub name_template: String,
     pub default_dest_folder: String,
+    pub auto_categorize: bool,
     // VLM 设置
     pub vlm_enabled: bool,
     pub vlm_same_as_llm: bool,
@@ -56,6 +57,7 @@ impl Default for AppConfig {
             watch_extensions: default_watch_extensions(),
             name_template: String::new(),
             default_dest_folder: String::new(),
+            auto_categorize: false,
             vlm_enabled: false,
             vlm_same_as_llm: true,
             vlm_base_url: String::new(),

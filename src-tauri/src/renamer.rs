@@ -122,11 +122,42 @@ fn do_rename(task: &RenameTask) -> Result<String> {
     Ok(final_name)
 }
 
+/// 根据文件扩展名返回分类子目录名
+fn category_subfolder(filename: &str) -> &'static str {
+    let ext = Path::new(filename)
+        .extension()
+        .map(|e| e.to_ascii_lowercase().to_string_lossy().to_string())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "heic" | "webp" | "tiff" | "gif" | "bmp" | "svg" => "Images",
+        "md" | "txt" | "docx" | "doc" | "rtf" | "pptx" | "xlsx" | "xls" => "Documents",
+        "pdf" => "PDFs",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" => "Archives",
+        _ => "",
+    }
+}
+
 /// Moves a file to a destination folder with a new name, falling back to copy+delete across filesystems.
-pub fn move_and_rename(src_path: &str, dest_folder: &str, new_name: &str) -> Result<String> {
+pub fn move_and_rename(
+    src_path: &str,
+    dest_folder: &str,
+    new_name: &str,
+    auto_categorize: bool,
+) -> Result<String> {
     let src = Path::new(src_path);
-    let dest = Path::new(dest_folder);
-    let dst = resolve_conflict(dest, new_name);
+    let mut dest = std::path::PathBuf::from(dest_folder);
+
+    if auto_categorize {
+        let sub = category_subfolder(new_name);
+        if !sub.is_empty() {
+            dest = dest.join(sub);
+        }
+    }
+
+    // 确保目标目录存在
+    std::fs::create_dir_all(&dest)?;
+
+    let dst = resolve_conflict(&dest, new_name);
     let final_name = dst
         .file_name()
         .unwrap_or_default()

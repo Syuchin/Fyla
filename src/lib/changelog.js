@@ -1,6 +1,15 @@
 // 每次发版在数组头部加一条即可
 export const changelog = [
   {
+    version: '1.0.2',
+    date: '2026-02-24',
+    notes: [
+      '修复文件名双后缀显示问题（VLM + 前端双层防御）',
+      '新增按文件类型自动分类保存（Images / Documents / PDFs / Archives）',
+      '确认面板增加「保存到」路径提示',
+    ],
+  },
+  {
     version: '1.0.1',
     date: '2026-02-24',
     notes: [

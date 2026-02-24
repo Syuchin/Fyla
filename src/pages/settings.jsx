@@ -354,6 +354,16 @@ export function SettingsPage() {
               </button>
             </div>
           </div>
+          <div class="settings-row">
+            <span class="settings-label">
+              {t('settings.autoCategorize')}
+              <small>{t('settings.autoCategorizeHint')}</small>
+            </span>
+            <label class="toggle">
+              <input type="checkbox" checked={c.autoCategorize} onChange={e => update('autoCategorize', e.target.checked)} />
+              <span class="toggle-slider" />
+            </label>
+          </div>
           <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
             <span class="settings-label">
               {t('settings.watchTypes')}

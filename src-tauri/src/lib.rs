@@ -312,8 +312,10 @@ fn move_and_rename(
     src_path: String,
     dest_folder: String,
     new_name: String,
+    auto_categorize: bool,
 ) -> Result<String, String> {
-    renamer::move_and_rename(&src_path, &dest_folder, &new_name).map_err(|e| e.to_string())
+    renamer::move_and_rename(&src_path, &dest_folder, &new_name, auto_categorize)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

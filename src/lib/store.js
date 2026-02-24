@@ -18,6 +18,7 @@ export const config = signal({
   watchExtensions: 'pdf',
   nameTemplate: '',
   defaultDestFolder: '',
+  autoCategorize: false,
 })
 
 // 文件夹路径

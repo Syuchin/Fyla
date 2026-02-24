@@ -341,13 +341,12 @@ pub async fn generate_filename_vlm(
     for attempt in 0..=max_retries {
         match call_vlm(&prompt, image_base64, mime, config).await {
             Ok(result) => {
-                let cleaned = result
-                    .trim()
-                    .trim_matches('"')
-                    .trim_matches('\'')
-                    .replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-")
-                    .trim()
-                    .to_string();
+                let ext = context.and_then(|ctx| {
+                    std::path::Path::new(&ctx.original_name)
+                        .extension()
+                        .map(|e| format!(".{}", e.to_string_lossy()))
+                });
+                let cleaned = clean_filename(&result, ext.as_deref());
 
                 if cleaned.is_empty() {
                     last_err = anyhow!("VLM 返回了空文件名");

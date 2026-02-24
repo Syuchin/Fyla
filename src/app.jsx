@@ -30,7 +30,11 @@ export function App() {
 
     try {
       const text = await extractFileText(path)
-      const newName = await generateFilename(text, config.value, path)
+      let newName = await generateFilename(text, config.value, path)
+      // 兜底：如果后端返回的名字仍带后缀，在前端去掉
+      if (ext && newName.toLowerCase().endsWith(ext.toLowerCase())) {
+        newName = newName.slice(0, -ext.length)
+      }
       confirmQueue.value = confirmQueue.value.map(item =>
         item.id === id ? { ...item, newName, status: 'ready' } : item
       )
@@ -139,7 +143,7 @@ export function App() {
     if (!item || !item.newName) return
     const newFullName = item.newName + item.ext
     try {
-      const actualName = await moveAndRename(item.path, item.destFolder, newFullName)
+      const actualName = await moveAndRename(item.path, item.destFolder, newFullName, !!config.value.autoCategorize)
       const newPath = item.destFolder + '/' + actualName
       await addHistory({
         id: item.id,
@@ -286,6 +290,7 @@ export function App() {
                       <span class="confirm-ext">{item.ext}</span>
                     </div>
                     <div class="confirm-item-row">
+                      <span class="confirm-dest-label">{t('confirm.saveTo')}</span>
                       <button class="confirm-dest-btn" onClick={() => handlePickDest(item.id)}>
                         {item.destFolder.split('/').pop() || item.destFolder}
                       </button>

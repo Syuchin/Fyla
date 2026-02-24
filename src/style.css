@@ -805,6 +805,12 @@ html, body {
   flex-shrink: 0;
 }
 
+.confirm-dest-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
 .confirm-dest-btn {
   padding: 4px 10px;
   border: 1px solid var(--border);
