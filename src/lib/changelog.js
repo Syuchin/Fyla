@@ -1,6 +1,14 @@
 // 每次发版在数组头部加一条即可
 export const changelog = [
   {
+    version: '1.1.1',
+    date: '2026-03-18',
+    notes: [
+      '修复 1.1.0 发布标签指向错误 commit 的问题，重新发布 Papers 大更新',
+      '统一应用版本号、安装包文件名与 GitHub Release 元数据',
+    ],
+  },
+  {
     version: '1.1.0',
     date: '2026-03-18',
     notes: [
