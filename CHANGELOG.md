@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.6
+
+- Switched PDF extraction to a bundled `pdftotext` sidecar for better compatibility with academic PDFs
+- Added PDFKit and OCR fallbacks so problematic PDFs fail gracefully instead of crashing the app
+- Cleaned extracted PDF text to reduce ligature and page-break noise
+
 ## v1.0.0
 
 ### Highlights

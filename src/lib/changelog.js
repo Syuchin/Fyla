@@ -1,6 +1,15 @@
 // 每次发版在数组头部加一条即可
 export const changelog = [
   {
+    version: '1.0.6',
+    date: '2026-03-18',
+    notes: [
+      'PDF 文本提取改为内置 pdftotext，兼容更多论文 PDF',
+      '新增 PDFKit/OCR 回退，避免部分 PDF 导致应用闪退',
+      '优化 PDF 文本清洗，减少分页和连字噪声',
+    ],
+  },
+  {
     version: '1.0.5',
     date: '2026-02-24',
     notes: [
