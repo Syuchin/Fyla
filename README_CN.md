@@ -87,7 +87,7 @@ npm run tauri build
 - **后端**：Rust，Tauri v2
 - **前端**：Preact，Vite
 - **OCR**：macOS Vision 框架（通过原生 C 桥接）
-- **文件解析**：pdf-extract、calamine、quick-xml、zip
+- **文件解析**：内置 pdftotext sidecar、PDFKit、calamine、quick-xml、zip
 - **macOS 原生特性**：窗口毛玻璃效果、状态栏托盘图标、NSServices 服务菜单、FSEvents 文件监听
 
 ## 参与贡献

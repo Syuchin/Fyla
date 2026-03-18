@@ -87,7 +87,7 @@ For image files, you can enable VLM to use multimodal models that actually "see"
 - **Backend**: Rust, Tauri v2
 - **Frontend**: Preact, Vite
 - **OCR**: macOS Vision framework (via native C bridge)
-- **File parsing**: pdf-extract, calamine, quick-xml, zip
+- **File parsing**: bundled pdftotext sidecar, PDFKit, calamine, quick-xml, zip
 - **macOS native**: window vibrancy, tray icon, NSServices, FSEvents
 
 ## Contributing

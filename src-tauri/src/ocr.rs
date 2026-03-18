@@ -4,6 +4,7 @@ use std::os::raw::c_char;
 unsafe extern "C" {
     fn recognize_text_from_path(path: *const c_char) -> *mut c_char;
     fn recognize_text_from_pdf(path: *const c_char) -> *mut c_char;
+    fn extract_text_from_pdf(path: *const c_char) -> *mut c_char;
 }
 
 /// Recognizes text from an image file using macOS Vision framework OCR.
@@ -16,6 +17,12 @@ pub fn ocr_from_file(path: &str) -> Result<String, String> {
 pub fn ocr_from_pdf(path: &str) -> Result<String, String> {
     let c_path = CString::new(path).map_err(|e| format!("路径编码错误: {}", e))?;
     unsafe { read_and_free(recognize_text_from_pdf(c_path.as_ptr())) }
+}
+
+/// Extracts the embedded text layer from a PDF using macOS PDFKit.
+pub fn pdf_text_from_pdf(path: &str) -> Result<String, String> {
+    let c_path = CString::new(path).map_err(|e| format!("路径编码错误: {}", e))?;
+    unsafe { read_and_free(extract_text_from_pdf(c_path.as_ptr())) }
 }
 
 unsafe fn read_and_free(ptr: *mut c_char) -> Result<String, String> {

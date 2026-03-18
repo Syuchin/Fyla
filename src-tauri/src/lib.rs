@@ -50,23 +50,7 @@ fn extract_file_content_inner(path: &str) -> anyhow::Result<String> {
         .unwrap_or_default();
 
     match ext.as_str() {
-        "pdf" => {
-            // 先尝试文本提取，文本太少则 fallback 到 OCR（扫描版 PDF）
-            let text = pdf::extract_text(path).unwrap_or_default();
-            if text.trim().len() < 50 {
-                match ocr::ocr_from_pdf(path) {
-                    Ok(ocr_text) if !ocr_text.trim().is_empty() => Ok(ocr_text),
-                    _ => {
-                        if text.trim().is_empty() {
-                            anyhow::bail!("无法提取文本，可能是扫描版或加密 PDF")
-                        }
-                        Ok(text)
-                    }
-                }
-            } else {
-                Ok(text)
-            }
-        }
+        "pdf" => pdf::extract_pdf_text(path),
         "docx" | "pptx" | "xlsx" | "xls" | "txt" | "md" | "markdown" => pdf::extract_text(path),
         "jpg" | "jpeg" | "png" | "heic" | "webp" | "tiff" => {
             let ocr_text = ocr::ocr_from_file(path).unwrap_or_default();

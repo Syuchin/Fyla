@@ -109,6 +109,20 @@ char* recognize_text_from_pdf(const char* path) {
     }
 }
 
+// 使用 PDFKit 直接提取 PDF 文本层
+char* extract_text_from_pdf(const char* path) {
+    @autoreleasepool {
+        NSString *filePath = [NSString stringWithUTF8String:path];
+        NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+        PDFDocument *doc = [[PDFDocument alloc] initWithURL:fileURL];
+        if (!doc) return strdup("");
+
+        NSString *text = [doc string];
+        if (!text) return strdup("");
+        return strdup([text UTF8String]);
+    }
+}
+
 // --- Autostart (SMAppService, macOS 13+) ---
 
 int autostart_enable(void) {
