@@ -5,11 +5,13 @@ use std::process::Command;
 
 const MAX_EXTRACTED_CHARS: usize = 2000;
 const MIN_PDF_TEXT_CHARS: usize = 50;
+const PDFTOTEXT_PACKAGED_NAME: &str = "pdftotext";
 
 #[cfg(target_arch = "aarch64")]
 const PDFTOTEXT_BINARY_NAME: &str = "pdftotext-aarch64-apple-darwin";
 #[cfg(target_arch = "x86_64")]
 const PDFTOTEXT_BINARY_NAME: &str = "pdftotext-x86_64-apple-darwin";
+const PDFTOTEXT_UNIVERSAL_BINARY_NAME: &str = "pdftotext-universal-apple-darwin";
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 compile_error!("Unsupported macOS architecture for bundled pdftotext sidecar");
 
@@ -237,20 +239,28 @@ fn resolve_pdftotext_sidecar() -> Result<PathBuf> {
             } else {
                 exe_dir
             };
+            candidates.push(base_dir.join(PDFTOTEXT_PACKAGED_NAME));
             candidates.push(base_dir.join(PDFTOTEXT_BINARY_NAME));
+            candidates.push(base_dir.join(PDFTOTEXT_UNIVERSAL_BINARY_NAME));
         }
     }
 
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("binaries")
-            .join(PDFTOTEXT_BINARY_NAME),
-    );
+    let manifest_binaries = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    candidates.push(manifest_binaries.join(PDFTOTEXT_BINARY_NAME));
+    candidates.push(manifest_binaries.join(PDFTOTEXT_UNIVERSAL_BINARY_NAME));
+    candidates.push(manifest_binaries.join(PDFTOTEXT_PACKAGED_NAME));
 
     candidates
         .into_iter()
         .find(|candidate| candidate.is_file())
-        .ok_or_else(|| anyhow!("未找到 {}", PDFTOTEXT_BINARY_NAME))
+        .ok_or_else(|| {
+            anyhow!(
+                "未找到 pdftotext sidecar（checked: {}, {}, {}）",
+                PDFTOTEXT_PACKAGED_NAME,
+                PDFTOTEXT_BINARY_NAME,
+                PDFTOTEXT_UNIVERSAL_BINARY_NAME
+            )
+        })
 }
 
 fn normalize_pdf_text(input: &str) -> String {
