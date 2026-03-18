@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
 import { config, showToast, isWatching, showWelcome } from '../lib/store.js'
-import { saveConfig, startWatch, stopWatch, pickFolder, testConnection } from '../lib/tauri.js'
+import { saveConfig, startWatch, stopWatch, pickFolder, testConnection, testPaperConnection } from '../lib/tauri.js'
 import { invoke } from '@tauri-apps/api/core'
 import { changelog } from '../lib/changelog.js'
 import { t, lang, setLang } from '../lib/i18n.js'
@@ -13,6 +13,8 @@ export function SettingsPage() {
   const [autoStart, setAutoStart] = useState(false)
   const [showChangelog, setShowChangelog] = useState(false)
   const [checking, setChecking] = useState(false)
+  const [testingPaper, setTestingPaper] = useState(false)
+  const [paperTestResult, setPaperTestResult] = useState(null)
 
   useEffect(() => {
     invoke('is_autostart_enabled').then(setAutoStart).catch(() => {})
@@ -33,6 +35,17 @@ export function SettingsPage() {
       setTestResult({ ok: false, msg: String(e) })
     }
     setTesting(false)
+  }
+
+  async function handleTestPaperConnection() {
+    setTestingPaper(true); setPaperTestResult(null)
+    try {
+      const msg = await testPaperConnection(config.value)
+      setPaperTestResult({ ok: true, msg })
+    } catch (e) {
+      setPaperTestResult({ ok: false, msg: String(e) })
+    }
+    setTestingPaper(false)
   }
 
   return (
@@ -332,6 +345,139 @@ export function SettingsPage() {
               )}
             </>
           )}
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">{t('settings.paperReading')}</div>
+          <div class="settings-row settings-row-stack">
+            <span class="settings-label">
+              {t('settings.paperReading')}
+              <small>{t('settings.paperReadingIntro')}</small>
+            </span>
+            <span class="settings-inline-note">{t('settings.paperManualOnly')}</span>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">{t('settings.selectPaperMode')}</span>
+            <div class="toggle-group">
+              <button
+                class={`toggle-option ${c.paperProvider === 'ollama' ? 'active' : ''}`}
+                onClick={() => update('paperProvider', 'ollama')}
+              >
+                {t('settings.ollamaLocal')}
+              </button>
+              <button
+                class={`toggle-option ${c.paperProvider === 'openai' ? 'active' : ''}`}
+                onClick={() => update('paperProvider', 'openai')}
+              >
+                {t('settings.openaiCompat')}
+              </button>
+            </div>
+          </div>
+
+          {c.paperProvider === 'ollama' ? (
+            <>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.paperServerUrl')}
+                  <small>{t('settings.paperServerUrlHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.paperOllamaUrl}
+                  onInput={e => update('paperOllamaUrl', e.target.value)}
+                  placeholder="http://localhost:11434"
+                />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.paperModel')}
+                  <small>{t('settings.paperModelHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.paperOllamaModel}
+                  onInput={e => update('paperOllamaModel', e.target.value)}
+                  placeholder="llama3.2"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.paperBaseUrl')}
+                  <small>{t('settings.paperBaseUrlHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.paperOpenaiBaseUrl}
+                  onInput={e => update('paperOpenaiBaseUrl', e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.paperApiKey')}
+                  <small>Bearer Token</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="password"
+                  value={c.paperOpenaiKey}
+                  onInput={e => update('paperOpenaiKey', e.target.value)}
+                  placeholder="sk-..."
+                />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">
+                  {t('settings.paperModel')}
+                  <small>{t('settings.paperModelHint')}</small>
+                </span>
+                <input
+                  class="settings-input"
+                  type="text"
+                  value={c.paperOpenaiModel}
+                  onInput={e => update('paperOpenaiModel', e.target.value)}
+                  placeholder="gpt-4.1"
+                />
+              </div>
+            </>
+          )}
+
+          <div class="settings-row">
+            <span class="settings-label">
+              {t('settings.paperArchiveRoot')}
+              <small>{t('settings.paperArchiveRootHint')}</small>
+            </span>
+            <div class="settings-picker-group">
+              <input
+                class="settings-input settings-input-wide"
+                type="text"
+                value={c.paperArchiveRoot}
+                onInput={e => update('paperArchiveRoot', e.target.value)}
+                placeholder="/Users/chenghaoyang/Local/papers"
+              />
+              <button class="btn btn-secondary" onClick={async () => {
+                const path = await pickFolder()
+                if (path) update('paperArchiveRoot', path)
+              }}>
+                {t('settings.pick')}
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-row settings-action-row">
+            <span class={`settings-action-feedback ${paperTestResult ? (paperTestResult.ok ? 'is-success' : 'is-error') : ''}`}>
+              {paperTestResult ? paperTestResult.msg : t('settings.paperArchiveBrowseHint')}
+            </span>
+            <button class="btn btn-secondary" disabled={testingPaper} onClick={handleTestPaperConnection}>
+              {testingPaper ? t('settings.testing') : t('settings.testPaperConnection')}
+            </button>
+          </div>
         </div>
 
         {/* Auto Watch */}

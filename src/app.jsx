@@ -5,14 +5,18 @@ import {
   isWatching, recentActivity, showToast, showWelcome,
 } from './lib/store.js'
 import { tasks, stats, enqueueFile, confirmAll, dismissAll } from './lib/taskQueue.js'
+import { enqueuePaperPaths, hydratePaperHistory, paperStats, resetPaperTab } from './lib/paperQueue.js'
 import { getConfig, getHistory, undoRename, friendlyError, setBadgeCount, scanPaths } from './lib/tauri.js'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { useAppShortcuts } from './lib/shortcuts.js'
 import { t, lang, toggleLang } from './lib/i18n.js'
 import { checkForUpdate } from './lib/updater.js'
+import { syncWindowMode } from './lib/windowMode.js'
 import { FilesPage } from './pages/files.jsx'
 import { SettingsPage } from './pages/settings.jsx'
 import { HistoryPage } from './pages/history.jsx'
+import { PapersPage } from './pages/papers.jsx'
+import { PaperDetailPage } from './pages/paper-detail.jsx'
 import { WelcomeGuide, useOnboard } from './components/WelcomeGuide.jsx'
 
 export function App() {
@@ -44,6 +48,8 @@ export function App() {
       }
     }).catch(() => {})
 
+    hydratePaperHistory().catch(() => {})
+
     const unlisten = listen('new-file', async (event) => {
       const { path, name } = event.payload
       try {
@@ -71,8 +77,18 @@ export function App() {
       const paths = event.payload.paths || []
       if (!paths.length) return
       const files = await scanPaths(paths, 3)
-      for (const f of files) {
-        enqueueFile(f.path, f.name, 'drop')
+      const isPaperSurface = currentPage.value === 'papers' || currentPage.value === 'paper-detail'
+      if (isPaperSurface) {
+        const pdfPaths = files.filter(file => /\.pdf$/i.test(file.path)).map(file => file.path)
+        if (!pdfPaths.length) {
+          showToast(t('papers.onlyPdf'))
+          return
+        }
+        enqueuePaperPaths(pdfPaths, 'drop')
+        return
+      }
+      for (const file of files) {
+        enqueueFile(file.path, file.name, 'drop')
       }
     })
 
@@ -111,6 +127,8 @@ export function App() {
   function renderPage(page) {
     switch (page) {
       case 'history':  return <HistoryPage />
+      case 'papers': return <PapersPage />
+      case 'paper-detail': return <PaperDetailPage />
       case 'settings': return <SettingsPage />
       default:         return <FilesPage />
     }
@@ -118,11 +136,20 @@ export function App() {
 
   const [dragOver, setDragOver] = useState(false)
   const { ready, processing } = stats.value
+  const paperProcessing = paperStats.value.processing
   const pendingCount = ready + processing
+  const papersActive = currentPage.value === 'papers' || currentPage.value === 'paper-detail'
 
   useEffect(() => {
     setBadgeCount(pendingCount).catch(() => {})
   }, [pendingCount])
+
+  useEffect(() => {
+    syncWindowMode(currentPage.value).catch(() => {})
+    if (currentPage.value !== 'papers' && currentPage.value !== 'paper-detail') {
+      resetPaperTab()
+    }
+  }, [currentPage.value])
 
   return (
     <div id="app">
@@ -151,6 +178,12 @@ export function App() {
             {t('nav.history')}
           </button>
           <button
+            class={`tab ${papersActive ? 'active' : ''}`}
+            onClick={() => currentPage.value = 'papers'}
+          >
+            {t('nav.papers')}
+          </button>
+          <button
             class={`tab ${currentPage.value === 'settings' ? 'active' : ''}`}
             onClick={() => currentPage.value = 'settings'}
           >
@@ -166,6 +199,12 @@ export function App() {
             <div class="pending-badge" title={t('confirm.pendingBadge', { count: pendingCount })} onClick={() => currentPage.value = 'files'}>
               <span class="pending-count">{pendingCount}</span>
               <span class="pending-text">{t('confirm.pendingLabel')}</span>
+            </div>
+          )}
+          {paperProcessing > 0 && (
+            <div class="pending-badge pending-badge-paper" title={t('papers.processingBadge', { count: paperProcessing })} onClick={() => currentPage.value = 'papers'}>
+              <span class="pending-count">{paperProcessing}</span>
+              <span class="pending-text">{t('nav.papers')}</span>
             </div>
           )}
           {isWatching.value && (

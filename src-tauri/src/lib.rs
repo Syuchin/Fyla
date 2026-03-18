@@ -2,6 +2,7 @@ mod autostart;
 mod config;
 mod llm;
 mod ocr;
+mod paper;
 mod pdf;
 mod renamer;
 mod scanner;
@@ -38,6 +39,27 @@ async fn scan_folder(path: String, extensions: String) -> Result<Vec<FileInfo>, 
 async fn extract_file_text(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         extract_file_content_inner(&path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn read_paper_archive_markdown(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if path.trim().is_empty() {
+            return Err("论文归档路径为空".to_string());
+        }
+
+        let archive_path = std::path::Path::new(&path);
+        if !archive_path.exists() {
+            return Err("论文归档文件不存在".to_string());
+        }
+        if !archive_path.is_file() {
+            return Err("论文归档路径不是文件".to_string());
+        }
+
+        std::fs::read_to_string(archive_path).map_err(|e| format!("读取论文归档失败: {}", e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -322,6 +344,23 @@ async fn test_connection(config: AppConfig) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn test_paper_connection(config: AppConfig) -> Result<String, String> {
+    paper::test_connection(&config)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn generate_paper_reviews_stream(
+    paths: Vec<String>,
+    config: AppConfig,
+    project_name: Option<String>,
+    on_event: tauri::ipc::Channel<paper::PaperStreamEvent>,
+) -> Result<(), String> {
+    paper::generate_reviews_stream(paths, config, project_name, on_event).await
+}
+
+#[tauri::command]
 fn get_history() -> Result<Vec<config::HistoryEntry>, String> {
     Ok(config::load_history())
 }
@@ -329,6 +368,28 @@ fn get_history() -> Result<Vec<config::HistoryEntry>, String> {
 #[tauri::command]
 fn add_history(entry: config::HistoryEntry) -> Result<(), String> {
     config::add_history(entry).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_paper_history() -> Result<Vec<config::PaperHistoryEntry>, String> {
+    Ok(config::load_paper_history())
+}
+
+#[tauri::command]
+fn add_paper_history(
+    entry: config::PaperHistoryEntry,
+) -> Result<Vec<config::PaperHistoryEntry>, String> {
+    config::add_paper_history(entry).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_paper_history_item(id: String) -> Result<Vec<config::PaperHistoryEntry>, String> {
+    config::remove_paper_history_item(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_paper_history() -> Result<(), String> {
+    config::clear_paper_history().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -407,13 +468,20 @@ pub fn run() {
             save_config,
             scan_folder,
             extract_file_text,
+            read_paper_archive_markdown,
             generate_filename,
             generate_names_stream,
             rename_files,
             move_and_rename,
             test_connection,
+            test_paper_connection,
+            generate_paper_reviews_stream,
             get_history,
             add_history,
+            get_paper_history,
+            add_paper_history,
+            remove_paper_history_item,
+            clear_paper_history,
             undo_rename,
             start_watch,
             stop_watch,

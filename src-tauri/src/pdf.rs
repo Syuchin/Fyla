@@ -17,6 +17,7 @@ compile_error!("Unsupported macOS architecture for bundled pdftotext sidecar");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PdfExtractor {
+    Pymupdf4llm,
     Pdftotext,
     PdfKit,
     Ocr,
@@ -25,6 +26,7 @@ enum PdfExtractor {
 impl PdfExtractor {
     fn label(self) -> &'static str {
         match self {
+            Self::Pymupdf4llm => "pymupdf4llm",
             Self::Pdftotext => "pdftotext",
             Self::PdfKit => "pdfkit",
             Self::Ocr => "ocr",
@@ -36,6 +38,13 @@ impl PdfExtractor {
 struct PdfSelection {
     extractor: PdfExtractor,
     text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PdfExtracted {
+    pub extractor: String,
+    pub text: String,
+    pub warning: Option<String>,
 }
 
 /// Extracts text from PDF, DOCX, PPTX, XLSX, TXT, and MD files (truncated to 2000 chars).
@@ -65,6 +74,43 @@ pub fn extract_text(path: &str) -> Result<String> {
 }
 
 pub fn extract_pdf_text(path: &str) -> Result<String> {
+    let extracted = extract_pdf_text_detailed(path)?;
+    Ok(smart_truncate(&extracted.text, MAX_EXTRACTED_CHARS))
+}
+
+pub fn extract_pdf_text_for_paper(path: &str) -> Result<PdfExtracted> {
+    let pymupdf = extract_pdf_with_pymupdf4llm(path)
+        .map(|text| normalize_markdown_for_review(&text))
+        .and_then(|text| {
+            if effective_len(&text) >= MIN_PDF_TEXT_CHARS {
+                Ok(PdfExtracted {
+                    extractor: PdfExtractor::Pymupdf4llm.label().to_string(),
+                    text,
+                    warning: None,
+                })
+            } else {
+                Err(anyhow!("pymupdf4llm 输出过短"))
+            }
+        });
+    let pymupdf_log: Result<String> = match &pymupdf {
+        Ok(value) => Ok(value.text.clone()),
+        Err(err) => Err(anyhow!(err.to_string())),
+    };
+    log_pdf_attempt(path, PdfExtractor::Pymupdf4llm, &pymupdf_log);
+
+    match pymupdf {
+        Ok(extracted) => Ok(extracted),
+        Err(err) => {
+            eprintln!(
+                "[pdf] falling back to standard paper extractors for {} after pymupdf4llm failure: {}",
+                path, err
+            );
+            extract_pdf_text_detailed(path)
+        }
+    }
+}
+
+pub fn extract_pdf_text_detailed(path: &str) -> Result<PdfExtracted> {
     let sidecar = extract_pdf_with_pdftotext(path);
     log_pdf_attempt(path, PdfExtractor::Pdftotext, &sidecar);
 
@@ -105,7 +151,20 @@ pub fn extract_pdf_text(path: &str) -> Result<String> {
         selection.extractor.label(),
         path
     );
-    Ok(smart_truncate(&selection.text, MAX_EXTRACTED_CHARS))
+    let warning = match selection.extractor {
+        PdfExtractor::Ocr => Some(
+            "本篇论文依赖 OCR 提取文本，版式、公式或表格细节可能存在偏差。".to_string(),
+        ),
+        PdfExtractor::PdfKit if effective_len(&selection.text) < 500 => Some(
+            "本篇论文的 PDF 文本层较弱，当前解读可能受提取质量影响。".to_string(),
+        ),
+        _ => None,
+    };
+    Ok(PdfExtracted {
+        extractor: selection.extractor.label().to_string(),
+        text: normalize_pdf_text_for_review(&selection.text),
+        warning,
+    })
 }
 
 fn effective_len_from_result(result: &Result<String>) -> usize {
@@ -223,6 +282,59 @@ fn extract_pdf_with_pdftotext(path: &str) -> Result<String> {
     Ok(normalize_pdf_text(&String::from_utf8_lossy(&output.stdout)))
 }
 
+fn extract_pdf_with_pymupdf4llm(path: &str) -> Result<String> {
+    let python = resolve_pymupdf4llm_python()?;
+    let script = r#"
+from pathlib import Path
+import pymupdf4llm
+import sys
+
+pdf = Path(sys.argv[1])
+md = pymupdf4llm.to_markdown(str(pdf), write_images=False, embed_images=False)
+sys.stdout.write(md)
+"#;
+
+    let output = Command::new(&python)
+        .args(["-c", script, path])
+        .output()
+        .with_context(|| format!("调用 pymupdf4llm 失败: {}", python.display()))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        eprintln!("[pdf] pymupdf4llm stderr for {}: {}", path, stderr);
+    }
+
+    if !output.status.success() {
+        let code = output
+            .status
+            .code()
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "terminated by signal".into());
+        return Err(anyhow!("退出码 {}: {}", code, stderr));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn resolve_pymupdf4llm_python() -> Result<PathBuf> {
+    if let Ok(path) = std::env::var("FYLA_PYMUPDF4LLM_PYTHON") {
+        let candidate = PathBuf::from(path);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidate = PathBuf::from(home).join(".venvs/paper-reading/bin/python");
+    if candidate.is_file() {
+        Ok(candidate)
+    } else {
+        Err(anyhow!(
+            "未找到 pymupdf4llm Python 解释器（可通过 FYLA_PYMUPDF4LLM_PYTHON 指定）"
+        ))
+    }
+}
+
 fn resolve_pdftotext_sidecar() -> Result<PathBuf> {
     if let Ok(path) = std::env::var("FYLA_PDFTOTEXT_PATH") {
         let candidate = PathBuf::from(path);
@@ -301,6 +413,90 @@ fn normalize_pdf_text(input: &str) -> String {
     }
 
     lines.join("\n")
+}
+
+fn normalize_pdf_text_for_review(input: &str) -> String {
+    let normalized = normalize_pdf_text(input);
+    let lines: Vec<String> = normalized.lines().map(|line| line.trim().to_string()).collect();
+
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    for line in &lines {
+        if is_probable_running_header(line) {
+            *counts.entry(line.clone()).or_default() += 1;
+        }
+    }
+
+    let mut cleaned = Vec::new();
+    let mut blank_run = 0usize;
+    for line in lines {
+        if is_probable_running_header(&line) && counts.get(&line).copied().unwrap_or_default() >= 3
+        {
+            continue;
+        }
+
+        if line.is_empty() {
+            blank_run += 1;
+            if blank_run <= 1 && !cleaned.is_empty() {
+                cleaned.push(String::new());
+            }
+            continue;
+        }
+
+        blank_run = 0;
+        cleaned.push(line);
+    }
+
+    while matches!(cleaned.last(), Some(last) if last.is_empty()) {
+        cleaned.pop();
+    }
+
+    cleaned.join("\n")
+}
+
+fn normalize_markdown_for_review(input: &str) -> String {
+    let text = input.replace("\r\n", "\n").replace('\r', "\n");
+    let mut cleaned = Vec::new();
+    let mut blank_run = 0usize;
+
+    for line in text.lines() {
+        let trimmed = line.trim_end();
+        if trimmed == "==> picture intentionally omitted <==" || trimmed.contains("intentionally omitted") {
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            blank_run += 1;
+            if blank_run <= 1 && !cleaned.is_empty() {
+                cleaned.push(String::new());
+            }
+            continue;
+        }
+
+        blank_run = 0;
+        cleaned.push(trimmed.to_string());
+    }
+
+    while matches!(cleaned.last(), Some(last) if last.is_empty()) {
+        cleaned.pop();
+    }
+
+    cleaned.join("\n")
+}
+
+fn is_probable_running_header(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 120 {
+        return false;
+    }
+
+    let lower = trimmed.to_lowercase();
+    let digits_only = trimmed.chars().all(|ch| ch.is_ascii_digit());
+    digits_only
+        || lower.starts_with("page ")
+        || lower.contains("arxiv")
+        || lower.contains("preprint")
+        || lower.contains("proceedings")
+        || lower.contains("conference on")
 }
 
 fn smart_truncate(text: &str, max_chars: usize) -> String {

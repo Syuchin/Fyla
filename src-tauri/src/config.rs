@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 static HISTORY_LOCK: Mutex<()> = Mutex::new(());
+static PAPER_HISTORY_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -28,6 +29,13 @@ pub struct AppConfig {
     pub vlm_base_url: String,
     pub vlm_key: String,
     pub vlm_model: String,
+    pub paper_provider: String,
+    pub paper_ollama_url: String,
+    pub paper_ollama_model: String,
+    pub paper_openai_key: String,
+    pub paper_openai_model: String,
+    pub paper_openai_base_url: String,
+    pub paper_archive_root: String,
 }
 
 fn default_naming_style() -> String {
@@ -38,6 +46,12 @@ fn default_watch_extensions() -> String {
 }
 fn default_openai_base_url() -> String {
     "https://api.openai.com/v1".into()
+}
+fn default_paper_provider() -> String {
+    "openai".into()
+}
+fn default_paper_archive_root() -> String {
+    "/Users/chenghaoyang/Local/papers".into()
 }
 
 impl Default for AppConfig {
@@ -61,6 +75,13 @@ impl Default for AppConfig {
             vlm_base_url: String::new(),
             vlm_key: String::new(),
             vlm_model: String::new(),
+            paper_provider: default_paper_provider(),
+            paper_ollama_url: "http://localhost:11434".into(),
+            paper_ollama_model: "llama3.2".into(),
+            paper_openai_key: String::new(),
+            paper_openai_model: "gpt-4.1".into(),
+            paper_openai_base_url: default_openai_base_url(),
+            paper_archive_root: default_paper_archive_root(),
         }
     }
 }
@@ -167,4 +188,70 @@ pub fn undo_rename(id: u64) -> Result<HistoryEntry> {
 
     save_history(&history)?;
     Ok(entry)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PaperHistoryEntry {
+    pub id: String,
+    pub source_path: String,
+    pub original_name: String,
+    pub saved_path: String,
+    pub title: String,
+    pub year: String,
+    pub venue: String,
+    pub slug: String,
+    pub summary: String,
+    pub elapsed_ms: u64,
+    pub char_count: usize,
+    pub extractor: String,
+    pub extraction_warning: Option<String>,
+    pub completed_at: String,
+}
+
+fn paper_history_path() -> PathBuf {
+    let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("fyla").join("paper-history.json")
+}
+
+pub fn load_paper_history() -> Vec<PaperHistoryEntry> {
+    let path = paper_history_path();
+    if let Ok(data) = fs::read_to_string(&path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn save_paper_history(history: &[PaperHistoryEntry]) -> Result<()> {
+    let path = paper_history_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let data = serde_json::to_string_pretty(history)?;
+    fs::write(path, data)?;
+    Ok(())
+}
+
+pub fn add_paper_history(entry: PaperHistoryEntry) -> Result<Vec<PaperHistoryEntry>> {
+    let _lock = PAPER_HISTORY_LOCK.lock().unwrap();
+    let mut history = load_paper_history();
+    history.retain(|item| item.saved_path != entry.saved_path);
+    history.insert(0, entry);
+    history.truncate(80);
+    save_paper_history(&history)?;
+    Ok(history)
+}
+
+pub fn remove_paper_history_item(id: &str) -> Result<Vec<PaperHistoryEntry>> {
+    let _lock = PAPER_HISTORY_LOCK.lock().unwrap();
+    let mut history = load_paper_history();
+    history.retain(|item| item.id != id);
+    save_paper_history(&history)?;
+    Ok(history)
+}
+
+pub fn clear_paper_history() -> Result<()> {
+    let _lock = PAPER_HISTORY_LOCK.lock().unwrap();
+    save_paper_history(&[])
 }

@@ -18,6 +18,13 @@ export const config = signal({
   watchExtensions: 'pdf',
   nameTemplate: '',
   autoCategorize: false,
+  paperProvider: 'openai',
+  paperOllamaUrl: 'http://localhost:11434',
+  paperOllamaModel: 'llama3.2',
+  paperOpenaiKey: '',
+  paperOpenaiModel: 'gpt-4.1',
+  paperOpenaiBaseUrl: 'https://api.openai.com/v1',
+  paperArchiveRoot: '/Users/chenghaoyang/Local/papers',
 })
 
 // 文件夹路径
@@ -33,6 +40,10 @@ export const showWelcome = signal(false)
 
 // 重命名历史记录
 export const recentActivity = signal([])
+export const paperProjectName = signal('')
+export const currentPaperDetailId = signal(null)
+export const papersActiveTab = signal('history')
+export const paperListScrollPositions = signal({ history: 0, queue: 0 })
 
 // toast: null | { msg, undoId? }
 let toastTimer = null

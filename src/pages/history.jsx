@@ -1,13 +1,6 @@
 import { recentActivity, showToast } from '../lib/store.js'
-import { undoRename, friendlyError } from '../lib/tauri.js'
-import { Command } from '@tauri-apps/plugin-shell'
+import { undoRename, friendlyError, revealInFinder } from '../lib/tauri.js'
 import { t, lang } from '../lib/i18n.js'
-
-async function revealInFinder(path) {
-  try {
-    await Command.create('reveal-in-finder', ['-R', path]).execute()
-  } catch (_) {}
-}
 
 export function HistoryPage() {
   async function handleUndo(item) {
