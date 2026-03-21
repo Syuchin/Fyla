@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 static HISTORY_LOCK: Mutex<()> = Mutex::new(());
 static PAPER_HISTORY_LOCK: Mutex<()> = Mutex::new(());
+static PAPER_CHAT_SESSION_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -35,6 +36,13 @@ pub struct AppConfig {
     pub paper_openai_key: String,
     pub paper_openai_model: String,
     pub paper_openai_base_url: String,
+    pub paper_embedding_provider: String,
+    pub paper_embedding_ollama_url: String,
+    pub paper_embedding_ollama_model: String,
+    pub paper_embedding_openai_key: String,
+    pub paper_embedding_openai_model: String,
+    pub paper_embedding_openai_base_url: String,
+    pub paper_fulltext_token_limit: u32,
     pub paper_archive_root: String,
 }
 
@@ -49,6 +57,18 @@ fn default_openai_base_url() -> String {
 }
 fn default_paper_provider() -> String {
     "openai".into()
+}
+fn default_paper_embedding_provider() -> String {
+    "auto".into()
+}
+fn default_paper_embedding_ollama_model() -> String {
+    "nomic-embed-text".into()
+}
+fn default_paper_embedding_openai_model() -> String {
+    "text-embedding-3-small".into()
+}
+fn default_paper_fulltext_token_limit() -> u32 {
+    60_000
 }
 fn default_paper_archive_root() -> String {
     "/Users/chenghaoyang/Local/papers".into()
@@ -81,6 +101,13 @@ impl Default for AppConfig {
             paper_openai_key: String::new(),
             paper_openai_model: "gpt-4.1".into(),
             paper_openai_base_url: default_openai_base_url(),
+            paper_embedding_provider: default_paper_embedding_provider(),
+            paper_embedding_ollama_url: "http://localhost:11434".into(),
+            paper_embedding_ollama_model: default_paper_embedding_ollama_model(),
+            paper_embedding_openai_key: String::new(),
+            paper_embedding_openai_model: default_paper_embedding_openai_model(),
+            paper_embedding_openai_base_url: default_openai_base_url(),
+            paper_fulltext_token_limit: default_paper_fulltext_token_limit(),
             paper_archive_root: default_paper_archive_root(),
         }
     }
@@ -209,6 +236,55 @@ pub struct PaperHistoryEntry {
     pub completed_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PaperChatCitation {
+    pub id: String,
+    pub source: String,
+    pub label: String,
+    pub excerpt: String,
+    pub page: Option<u32>,
+    pub heading: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PaperChatAttachment {
+    pub kind: String,
+    pub label: String,
+    pub id: Option<String>,
+    pub path: Option<String>,
+    pub name: Option<String>,
+    pub mime: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub origin: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PaperChatMessageEntry {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+    pub citations: Vec<PaperChatCitation>,
+    pub attachments: Vec<PaperChatAttachment>,
+    pub created_at: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PaperChatSessionEntry {
+    pub paper_key: String,
+    pub session_id: String,
+    pub source_path: String,
+    pub saved_path: String,
+    pub title: String,
+    pub messages: Vec<PaperChatMessageEntry>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 fn paper_history_path() -> PathBuf {
     let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("fyla").join("paper-history.json")
@@ -254,4 +330,86 @@ pub fn remove_paper_history_item(id: &str) -> Result<Vec<PaperHistoryEntry>> {
 pub fn clear_paper_history() -> Result<()> {
     let _lock = PAPER_HISTORY_LOCK.lock().unwrap();
     save_paper_history(&[])
+}
+
+fn paper_chat_sessions_path() -> PathBuf {
+    let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("fyla").join("paper-chat-sessions.json")
+}
+
+pub fn load_paper_chat_sessions() -> Vec<PaperChatSessionEntry> {
+    let path = paper_chat_sessions_path();
+    if let Ok(data) = fs::read_to_string(&path) {
+        serde_json::from_str::<Vec<PaperChatSessionEntry>>(&data)
+            .unwrap_or_default()
+            .into_iter()
+            .map(normalize_paper_chat_session_entry)
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn save_paper_chat_sessions(sessions: &[PaperChatSessionEntry]) -> Result<()> {
+    let path = paper_chat_sessions_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let data = serde_json::to_string_pretty(sessions)?;
+    fs::write(path, data)?;
+    Ok(())
+}
+
+pub fn get_paper_chat_session(session_id: &str) -> Option<PaperChatSessionEntry> {
+    load_paper_chat_sessions()
+        .into_iter()
+        .find(|entry| entry.session_id == session_id)
+}
+
+pub fn list_paper_chat_sessions_by_paper(paper_key: &str) -> Vec<PaperChatSessionEntry> {
+    let mut sessions = load_paper_chat_sessions()
+        .into_iter()
+        .filter(|entry| entry.paper_key == paper_key)
+        .collect::<Vec<_>>();
+    sessions.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| right.created_at.cmp(&left.created_at))
+    });
+    sessions
+}
+
+pub fn get_latest_paper_chat_session_by_paper(paper_key: &str) -> Option<PaperChatSessionEntry> {
+    list_paper_chat_sessions_by_paper(paper_key)
+        .into_iter()
+        .next()
+}
+
+pub fn upsert_paper_chat_session(entry: PaperChatSessionEntry) -> Result<PaperChatSessionEntry> {
+    let _lock = PAPER_CHAT_SESSION_LOCK.lock().unwrap();
+    let mut sessions = load_paper_chat_sessions();
+    let entry = normalize_paper_chat_session_entry(entry);
+    sessions.retain(|item| item.session_id != entry.session_id);
+    sessions.insert(0, entry.clone());
+    sessions.truncate(120);
+    save_paper_chat_sessions(&sessions)?;
+    Ok(entry)
+}
+
+fn normalize_paper_chat_session_entry(mut entry: PaperChatSessionEntry) -> PaperChatSessionEntry {
+    if entry.paper_key.trim().is_empty() {
+        entry.paper_key = entry.session_id.clone();
+    }
+    if entry.created_at.trim().is_empty() {
+        entry.created_at = if entry.updated_at.trim().is_empty() {
+            String::new()
+        } else {
+            entry.updated_at.clone()
+        };
+    }
+    if entry.updated_at.trim().is_empty() {
+        entry.updated_at = entry.created_at.clone();
+    }
+    entry
 }

@@ -194,9 +194,10 @@ async fn review_single(
     });
 
     let extract_path = path.clone();
-    let extracted = tokio::task::spawn_blocking(move || pdf::extract_pdf_text_for_paper(&extract_path))
-        .await
-        .map_err(|err| anyhow!(err.to_string()))??;
+    let extracted =
+        tokio::task::spawn_blocking(move || pdf::extract_pdf_text_for_paper(&extract_path))
+            .await
+            .map_err(|err| anyhow!(err.to_string()))??;
 
     let _ = on_event.send(PaperStreamEvent::ItemPhaseChanged {
         source_path: path.clone(),
@@ -227,7 +228,8 @@ async fn review_single(
                 preview_chars: update.preview_chars,
             });
         }
-    }).await?;
+    })
+    .await?;
 
     let _ = on_event.send(PaperStreamEvent::ItemPhaseChanged {
         source_path: path.clone(),
@@ -392,18 +394,13 @@ where
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(180))
         .build()?;
-    let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_connect() {
-                anyhow!("无法连接 Ollama（{}），请确认已启动", config.ollama_url)
-            } else {
-                anyhow!("Ollama 网络错误: {}", e)
-            }
-        })?;
+    let resp = client.post(&url).json(&body).send().await.map_err(|e| {
+        if e.is_connect() {
+            anyhow!("无法连接 Ollama（{}），请确认已启动", config.ollama_url)
+        } else {
+            anyhow!("Ollama 网络错误: {}", e)
+        }
+    })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -644,7 +641,8 @@ fn extract_summary_from_markdown(markdown: &str) -> Option<String> {
         }
     }
 
-    lines.iter()
+    lines
+        .iter()
         .map(|line| line.trim())
         .find(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with("---"))
         .map(|line| line.to_string())
@@ -764,7 +762,12 @@ fn trim_references_for_prompt(text: &str) -> String {
         let lower = trimmed.to_lowercase();
         let looks_like_references = matches!(
             lower.as_str(),
-            "references" | "# references" | "## references" | "bibliography" | "# bibliography" | "## bibliography"
+            "references"
+                | "# references"
+                | "## references"
+                | "bibliography"
+                | "# bibliography"
+                | "## bibliography"
         );
         if looks_like_references && idx > lines.len() / 2 {
             cut_idx = Some(idx);

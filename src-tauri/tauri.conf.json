@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Fyla",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "identifier": "com.fyla.dev",
   "build": {
     "frontendDist": "../dist",
@@ -13,6 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
+        "label": "main",
         "title": "Fyla",
         "width": 560,
         "height": 480,
@@ -24,6 +25,16 @@
         "transparent": true,
         "visible": false,
         "trafficLightPosition": { "x": 13, "y": 24 }
+      },
+      {
+        "label": "paper-chat",
+        "title": "Fyla Chat",
+        "width": 440,
+        "height": 760,
+        "minWidth": 360,
+        "minHeight": 520,
+        "resizable": true,
+        "visible": false
       }
     ],
     "macOSPrivateApi": true,

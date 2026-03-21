@@ -18,12 +18,24 @@ export const config = signal({
   watchExtensions: 'pdf',
   nameTemplate: '',
   autoCategorize: false,
+  vlmEnabled: false,
+  vlmSameAsLlm: true,
+  vlmBaseUrl: '',
+  vlmKey: '',
+  vlmModel: '',
   paperProvider: 'openai',
   paperOllamaUrl: 'http://localhost:11434',
   paperOllamaModel: 'llama3.2',
   paperOpenaiKey: '',
   paperOpenaiModel: 'gpt-4.1',
   paperOpenaiBaseUrl: 'https://api.openai.com/v1',
+  paperEmbeddingProvider: 'auto',
+  paperEmbeddingOllamaUrl: 'http://localhost:11434',
+  paperEmbeddingOllamaModel: 'nomic-embed-text',
+  paperEmbeddingOpenaiKey: '',
+  paperEmbeddingOpenaiModel: 'text-embedding-3-small',
+  paperEmbeddingOpenaiBaseUrl: 'https://api.openai.com/v1',
+  paperFulltextTokenLimit: 60000,
   paperArchiveRoot: '/Users/chenghaoyang/Local/papers',
 })
 
@@ -44,6 +56,23 @@ export const paperProjectName = signal('')
 export const currentPaperDetailId = signal(null)
 export const papersActiveTab = signal('history')
 export const paperListScrollPositions = signal({ history: 0, queue: 0 })
+export const paperWorkspaceMode = signal('report')
+export const paperChatDraft = signal('')
+export const paperChatDraftQuote = signal(null)
+export const paperChatDraftAttachments = signal([])
+export const paperChatDraftImages = signal([])
+export const paperChatMentionMenuOpen = signal(false)
+export const paperChatActiveMentionQuery = signal('')
+export const paperChatHistoryPanelOpen = signal(false)
+export const paperChatSessions = signal({})
+export const activePaperChatPaper = signal(null)
+export const paperChatCurrentPaperSessions = signal([])
+export const paperChatWindowOpen = signal(false)
+export const paperChatPresentation = signal('embedded')
+export const paperSelectionContext = signal(null)
+export const activePaperChatSessionId = signal(null)
+export const activePaperChatWindowSessionId = signal(null)
+export const currentWindowLabel = signal('main')
 
 // toast: null | { msg, undoId? }
 let toastTimer = null

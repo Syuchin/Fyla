@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'preact/hooks'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import {
   currentPage, toast, config,
   isWatching, recentActivity, showToast, showWelcome,
+  currentWindowLabel,
 } from './lib/store.js'
 import { tasks, stats, enqueueFile, confirmAll, dismissAll } from './lib/taskQueue.js'
 import { enqueuePaperPaths, hydratePaperHistory, paperStats, resetPaperTab } from './lib/paperQueue.js'
@@ -12,11 +14,13 @@ import { useAppShortcuts } from './lib/shortcuts.js'
 import { t, lang, toggleLang } from './lib/i18n.js'
 import { checkForUpdate } from './lib/updater.js'
 import { syncWindowMode } from './lib/windowMode.js'
+import { reembedActivePaperChat } from './lib/paperChat.js'
 import { FilesPage } from './pages/files.jsx'
 import { SettingsPage } from './pages/settings.jsx'
 import { HistoryPage } from './pages/history.jsx'
 import { PapersPage } from './pages/papers.jsx'
 import { PaperDetailPage } from './pages/paper-detail.jsx'
+import { PaperChatWindowPage } from './pages/paper-chat-window.jsx'
 import { WelcomeGuide, useOnboard } from './components/WelcomeGuide.jsx'
 
 export function App() {
@@ -24,7 +28,12 @@ export function App() {
   if (!onboardDone) showWelcome.value = true
 
   useEffect(() => {
-    setTimeout(checkForUpdate, 5000)
+    const currentWindow = getCurrentWebviewWindow()
+    const windowLabel = currentWindow.label
+    currentWindowLabel.value = windowLabel
+    if (windowLabel === 'main') {
+      setTimeout(checkForUpdate, 5000)
+    }
 
     getConfig().then(c => {
       if (c) {
@@ -92,12 +101,22 @@ export function App() {
       }
     })
 
+    const unlistenPaperChatReembed = windowLabel === 'main'
+      ? listen('paper-chat:reembed', async event => {
+          await reembedActivePaperChat({
+            sessionId: event.payload?.sessionId || null,
+            hideWindow: false,
+          })
+        })
+      : Promise.resolve(() => {})
+
     return () => {
       unlisten.then(fn => fn())
       unlistenDrop.then(fn => fn())
       unlistenDragEnter.then(fn => fn())
       unlistenDragLeave.then(fn => fn())
       unlistenFinderService.then(fn => fn())
+      unlistenPaperChatReembed.then(fn => fn())
     }
   }, [])
 
@@ -145,13 +164,24 @@ export function App() {
   }, [pendingCount])
 
   useEffect(() => {
+    if (currentWindowLabel.value === 'paper-chat') return
     syncWindowMode(currentPage.value).catch(() => {})
     if (currentPage.value !== 'papers' && currentPage.value !== 'paper-detail') {
       resetPaperTab()
     }
-  }, [currentPage.value])
+  }, [currentPage.value, currentWindowLabel.value])
 
   return (
+    currentWindowLabel.value === 'paper-chat' ? (
+      <div id="app">
+        <PaperChatWindowPage />
+        {toast.value && (
+          <div class="toast">
+            <span>{toast.value.msg}</span>
+          </div>
+        )}
+      </div>
+    ) : (
     <div id="app">
       {dragOver && (
         <div class="drag-overlay">
@@ -239,5 +269,6 @@ export function App() {
         <WelcomeGuide onDone={() => { finishOnboard(); showWelcome.value = false }} />
       )}
     </div>
+    )
   )
 }

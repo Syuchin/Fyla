@@ -23,6 +23,8 @@ jobs:
 
       - run: npm install
 
+      - run: npm run release:verify-version -- "${{ github.ref_name }}"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -35,3 +37,8 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin
+
+      - run: npm run release:verify-remote -- "${{ github.ref_name }}"
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

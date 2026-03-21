@@ -3,6 +3,16 @@ import { relaunch } from '@tauri-apps/plugin-process'
 import { showToast } from './store.js'
 import { t } from './i18n.js'
 
+function isMissingLatestManifestError(message) {
+  const normalized = String(message || '').toLowerCase()
+  return normalized.includes('latest.json')
+    && (
+      normalized.includes('404')
+      || normalized.includes('not found')
+      || normalized.includes('status code 404')
+    )
+}
+
 export async function checkForUpdate() {
   try {
     const update = await check()
@@ -11,8 +21,8 @@ export async function checkForUpdate() {
     await update.downloadAndInstall()
     showToast(t('updater.ready'))
     setTimeout(() => relaunch(), 2000)
-  } catch (_) {
-    // silently ignore update check failures
+  } catch (err) {
+    console.error('[updater] background check failed', err)
   }
 }
 
@@ -31,7 +41,8 @@ export async function checkForUpdateManual(setChecking) {
     setTimeout(() => relaunch(), 2000)
   } catch (e) {
     const msg = String(e?.message || e || '')
-    if (msg.includes('404') || msg.includes('Not Found') || msg.includes('status code')) {
+    console.error('[updater] manual check failed', e)
+    if (isMissingLatestManifestError(msg)) {
       showToast(t('updater.upToDate'))
     } else {
       showToast(t('updater.checkFailed'))

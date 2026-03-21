@@ -1,12 +1,15 @@
 {
   "name": "fyla",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
-    "tauri:build": "tauri build"
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "release:verify-version": "node ./scripts/release-preflight.mjs",
+    "release:verify-remote": "bash ./scripts/verify-release-assets.sh"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
@@ -21,6 +24,7 @@
     "@tauri-apps/plugin-updater": "^2.10.0",
     "dompurify": "^3.3.3",
     "marked": "^17.0.4",
+    "pdfjs-dist": "^5.5.207",
     "preact": "^10.25.4",
     "preact-i18n": "^2.4.0-preactx"
   },

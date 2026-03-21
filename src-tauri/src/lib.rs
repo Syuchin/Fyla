@@ -1,8 +1,10 @@
 mod autostart;
 mod config;
+mod embedding;
 mod llm;
 mod ocr;
 mod paper;
+mod paper_chat;
 mod pdf;
 mod renamer;
 mod scanner;
@@ -14,7 +16,9 @@ mod watcher;
 use config::{AppConfig, load_config};
 use renamer::{FileInfo, RenameResult, RenameTask};
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::Manager;
+use tauri_plugin_shell::ShellExt;
 
 struct TrayState(Mutex<Option<tauri::tray::TrayIcon>>);
 
@@ -47,6 +51,7 @@ async fn extract_file_text(path: String) -> Result<String, String> {
 #[tauri::command]
 async fn read_paper_archive_markdown(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
+        let started_at = Instant::now();
         if path.trim().is_empty() {
             return Err("论文归档路径为空".to_string());
         }
@@ -59,7 +64,60 @@ async fn read_paper_archive_markdown(path: String) -> Result<String, String> {
             return Err("论文归档路径不是文件".to_string());
         }
 
-        std::fs::read_to_string(archive_path).map_err(|e| format!("读取论文归档失败: {}", e))
+        let result =
+            std::fs::read_to_string(archive_path).map_err(|e| format!("读取论文归档失败: {}", e));
+        match &result {
+            Ok(content) => eprintln!(
+                "[paper-perf] read_paper_archive_markdown path={} chars={} elapsedMs={}",
+                path,
+                content.len(),
+                started_at.elapsed().as_millis()
+            ),
+            Err(err) => eprintln!(
+                "[paper-perf] read_paper_archive_markdown.error path={} elapsedMs={} error={}",
+                path,
+                started_at.elapsed().as_millis(),
+                err
+            ),
+        }
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    tokio::task::spawn_blocking(move || {
+        let started_at = Instant::now();
+        if path.trim().is_empty() {
+            return Err("文件路径为空".to_string());
+        }
+
+        let file_path = std::path::Path::new(&path);
+        if !file_path.exists() {
+            return Err("文件不存在".to_string());
+        }
+        if !file_path.is_file() {
+            return Err("目标路径不是文件".to_string());
+        }
+
+        let result = std::fs::read(file_path).map_err(|e| format!("读取文件字节失败: {}", e));
+        match &result {
+            Ok(bytes) => eprintln!(
+                "[paper-perf] read_file_bytes path={} bytes={} elapsedMs={}",
+                path,
+                bytes.len(),
+                started_at.elapsed().as_millis()
+            ),
+            Err(err) => eprintln!(
+                "[paper-perf] read_file_bytes.error path={} elapsedMs={} error={}",
+                path,
+                started_at.elapsed().as_millis(),
+                err
+            ),
+        }
+        result
     })
     .await
     .map_err(|e| e.to_string())?
@@ -361,6 +419,114 @@ async fn generate_paper_reviews_stream(
 }
 
 #[tauri::command]
+async fn get_paper_embedding_status(
+    config: AppConfig,
+) -> Result<embedding::PaperEmbeddingStatus, String> {
+    Ok(embedding::get_status(&config).await)
+}
+
+#[tauri::command]
+async fn test_paper_embedding_connection(config: AppConfig) -> Result<String, String> {
+    embedding::test_connection(&config)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn prepare_paper_chat_session(
+    source_path: String,
+    saved_path: String,
+    title: String,
+    config: AppConfig,
+) -> Result<paper_chat::PaperChatPreparedSession, String> {
+    let started_at = Instant::now();
+    let source_path_for_log = source_path.clone();
+    let title_for_log = title.clone();
+    let result = paper_chat::prepare_paper_chat_session(source_path, saved_path, title, config);
+    match &result {
+        Ok(session) => eprintln!(
+            "[paper-perf] prepare_paper_chat_session title={} sourcePath={} sessionId={} strategy={} cachePrepared={} elapsedMs={}",
+            title_for_log,
+            source_path_for_log,
+            session.session_id,
+            session.retrieval_strategy.clone().unwrap_or_default(),
+            session.cache_prepared,
+            started_at.elapsed().as_millis()
+        ),
+        Err(err) => eprintln!(
+            "[paper-perf] prepare_paper_chat_session.error title={} sourcePath={} elapsedMs={} error={}",
+            title_for_log,
+            source_path_for_log,
+            started_at.elapsed().as_millis(),
+            err
+        ),
+    }
+    result.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_paper_chat_session(
+    source_path: String,
+    saved_path: String,
+    title: String,
+    config: AppConfig,
+) -> Result<paper_chat::PaperChatPreparedSession, String> {
+    paper_chat::create_paper_chat_session(source_path, saved_path, title, config)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_paper_chat_history(
+    session_id: String,
+) -> Result<Vec<config::PaperChatMessageEntry>, String> {
+    paper_chat::get_paper_chat_history(session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_paper_chat_session(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    paper_chat::clear_paper_chat_session(app, session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn stop_paper_chat_stream(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    paper_chat::stop_paper_chat_stream(app, session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stream_paper_chat_reply(
+    app: tauri::AppHandle,
+    session_id: String,
+    question: String,
+    attachments: Vec<config::PaperChatAttachment>,
+    images: Vec<paper_chat::PaperChatImageInput>,
+    selection_context: Option<paper_chat::PaperSelectionContext>,
+    config: AppConfig,
+    on_event: tauri::ipc::Channel<paper_chat::PaperChatStreamEvent>,
+) -> Result<(), String> {
+    paper_chat::stream_paper_chat_reply(
+        app,
+        session_id,
+        question,
+        attachments,
+        images,
+        selection_context,
+        config,
+        on_event,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn retry_paper_chat_turn(
+    app: tauri::AppHandle,
+    session_id: String,
+    config: AppConfig,
+    on_event: tauri::ipc::Channel<paper_chat::PaperChatStreamEvent>,
+) -> Result<(), String> {
+    paper_chat::retry_paper_chat_turn(app, session_id, config, on_event).await
+}
+
+#[tauri::command]
 fn get_history() -> Result<Vec<config::HistoryEntry>, String> {
     Ok(config::load_history())
 }
@@ -438,6 +604,55 @@ struct ExifInfo {
     camera: Option<String>,
 }
 
+fn should_guard_webview_navigation(label: &str) -> bool {
+    matches!(label, "main" | "paper-chat")
+}
+
+fn is_allowed_app_navigation(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "http" | "https" => {
+            if matches!(url.host_str(), Some("tauri.localhost" | "asset.localhost")) {
+                return true;
+            }
+
+            #[cfg(debug_assertions)]
+            {
+                if matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+                    && url.port_or_known_default() == Some(1420)
+                {
+                    return true;
+                }
+            }
+
+            false
+        }
+        _ => true,
+    }
+}
+
+fn guard_webview_navigation<R: tauri::Runtime>(
+    webview: &tauri::Webview<R>,
+    url: &tauri::Url,
+) -> bool {
+    if !should_guard_webview_navigation(webview.label()) {
+        return true;
+    }
+
+    if is_allowed_app_navigation(url) {
+        return true;
+    }
+
+    if matches!(url.scheme(), "http" | "https") {
+        #[allow(deprecated)]
+        if let Err(err) = webview.app_handle().shell().open(url.as_str(), None) {
+            eprintln!("failed to open external URL in browser: {err}");
+        }
+        return false;
+    }
+
+    true
+}
+
 fn read_exif_info(path: &std::path::Path) -> Option<ExifInfo> {
     let file = std::fs::File::open(path).ok()?;
     let mut reader = std::io::BufReader::new(file);
@@ -460,6 +675,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard")
+                .on_navigation(|webview, url| guard_webview_navigation(webview, url))
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -469,13 +689,23 @@ pub fn run() {
             scan_folder,
             extract_file_text,
             read_paper_archive_markdown,
+            read_file_bytes,
             generate_filename,
             generate_names_stream,
             rename_files,
             move_and_rename,
             test_connection,
             test_paper_connection,
+            get_paper_embedding_status,
+            test_paper_embedding_connection,
             generate_paper_reviews_stream,
+            prepare_paper_chat_session,
+            create_paper_chat_session,
+            get_paper_chat_history,
+            clear_paper_chat_session,
+            stop_paper_chat_stream,
+            stream_paper_chat_reply,
+            retry_paper_chat_turn,
             get_history,
             add_history,
             get_paper_history,
@@ -499,14 +729,17 @@ pub fn run() {
             // macOS: 应用毛玻璃效果
             #[cfg(target_os = "macos")]
             {
-                let window = app.get_webview_window("main").unwrap();
-                window_vibrancy::apply_vibrancy(
-                    &window,
-                    window_vibrancy::NSVisualEffectMaterial::HeaderView,
-                    None,
-                    None,
-                )
-                .expect("apply vibrancy");
+                for label in ["main", "paper-chat"] {
+                    if let Some(window) = app.get_webview_window(label) {
+                        window_vibrancy::apply_vibrancy(
+                            &window,
+                            window_vibrancy::NSVisualEffectMaterial::HeaderView,
+                            None,
+                            None,
+                        )
+                        .expect("apply vibrancy");
+                    }
+                }
             }
 
             // 右键菜单

@@ -75,7 +75,13 @@ async fn scan_dir_recursive(
                 results.push(ScannedFile { size, ..f });
             }
         } else if ft.is_dir() && current_depth < max_depth {
-            Box::pin(scan_dir_recursive(&path, max_depth, current_depth + 1, results)).await;
+            Box::pin(scan_dir_recursive(
+                &path,
+                max_depth,
+                current_depth + 1,
+                results,
+            ))
+            .await;
         }
     }
 }

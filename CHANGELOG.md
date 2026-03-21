@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.0
+
+- Fixed release version metadata so app version, updater manifest, and GitHub release assets stay in sync
+- Settings now shows the real runtime app version instead of deriving it from the local changelog list
+- Added release preflight and post-release verification for `latest.json`, signed app archive assets, and remote updater metadata
+- Re-reviewed paper reading stability before release, including report selection bubble, PDF visibility, and chat regressions
+
 ## v1.0.6
 
 - Switched PDF extraction to a bundled `pdftotext` sidecar for better compatibility with academic PDFs

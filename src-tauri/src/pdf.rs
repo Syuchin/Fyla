@@ -1,5 +1,5 @@
 use crate::ocr;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -45,6 +45,13 @@ pub struct PdfExtracted {
     pub extractor: String,
     pub text: String,
     pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfPageText {
+    pub page: u32,
+    pub text: String,
 }
 
 /// Extracts text from PDF, DOCX, PPTX, XLSX, TXT, and MD files (truncated to 2000 chars).
@@ -110,6 +117,52 @@ pub fn extract_pdf_text_for_paper(path: &str) -> Result<PdfExtracted> {
     }
 }
 
+pub fn extract_pdf_pages_for_chat(path: &str) -> Result<Vec<PdfPageText>> {
+    let binary = resolve_pdftotext_sidecar()
+        .with_context(|| format!("未找到 pdftotext sidecar for {}", PDFTOTEXT_BINARY_NAME))?;
+
+    let output = Command::new(&binary)
+        .args(["-enc", "UTF-8", path, "-"])
+        .output()
+        .with_context(|| format!("调用 pdftotext 分页提取失败: {}", binary.display()))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        eprintln!("[pdf] paged pdftotext stderr for {}: {}", path, stderr);
+    }
+
+    if output.status.success() {
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let pages = raw
+            .split('\u{c}')
+            .enumerate()
+            .filter_map(|(idx, chunk)| {
+                let normalized = normalize_pdf_text(chunk);
+                if effective_len(&normalized) < 8 {
+                    return None;
+                }
+                Some(PdfPageText {
+                    page: idx as u32 + 1,
+                    text: normalized,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if !pages.is_empty() {
+            return Ok(pages);
+        }
+    }
+
+    let fallback = extract_pdf_text_detailed(path)?;
+    if fallback.text.trim().is_empty() {
+        return Err(anyhow!("无法生成 PDF 页级文本缓存"));
+    }
+    Ok(vec![PdfPageText {
+        page: 1,
+        text: fallback.text,
+    }])
+}
+
 pub fn extract_pdf_text_detailed(path: &str) -> Result<PdfExtracted> {
     let sidecar = extract_pdf_with_pdftotext(path);
     log_pdf_attempt(path, PdfExtractor::Pdftotext, &sidecar);
@@ -152,12 +205,12 @@ pub fn extract_pdf_text_detailed(path: &str) -> Result<PdfExtracted> {
         path
     );
     let warning = match selection.extractor {
-        PdfExtractor::Ocr => Some(
-            "本篇论文依赖 OCR 提取文本，版式、公式或表格细节可能存在偏差。".to_string(),
-        ),
-        PdfExtractor::PdfKit if effective_len(&selection.text) < 500 => Some(
-            "本篇论文的 PDF 文本层较弱，当前解读可能受提取质量影响。".to_string(),
-        ),
+        PdfExtractor::Ocr => {
+            Some("本篇论文依赖 OCR 提取文本，版式、公式或表格细节可能存在偏差。".to_string())
+        }
+        PdfExtractor::PdfKit if effective_len(&selection.text) < 500 => {
+            Some("本篇论文的 PDF 文本层较弱，当前解读可能受提取质量影响。".to_string())
+        }
         _ => None,
     };
     Ok(PdfExtracted {
@@ -417,7 +470,10 @@ fn normalize_pdf_text(input: &str) -> String {
 
 fn normalize_pdf_text_for_review(input: &str) -> String {
     let normalized = normalize_pdf_text(input);
-    let lines: Vec<String> = normalized.lines().map(|line| line.trim().to_string()).collect();
+    let lines: Vec<String> = normalized
+        .lines()
+        .map(|line| line.trim().to_string())
+        .collect();
 
     let mut counts = std::collections::HashMap::<String, usize>::new();
     for line in &lines {
@@ -460,7 +516,9 @@ fn normalize_markdown_for_review(input: &str) -> String {
 
     for line in text.lines() {
         let trimmed = line.trim_end();
-        if trimmed == "==> picture intentionally omitted <==" || trimmed.contains("intentionally omitted") {
+        if trimmed == "==> picture intentionally omitted <=="
+            || trimmed.contains("intentionally omitted")
+        {
             continue;
         }
 
@@ -572,7 +630,7 @@ fn extract_docx(path: &str) -> Result<String> {
 }
 
 fn extract_xlsx(path: &str) -> Result<String> {
-    use calamine::{open_workbook_auto, Data, Reader};
+    use calamine::{Data, Reader, open_workbook_auto};
     let mut workbook = open_workbook_auto(path).map_err(|e| anyhow!("无法读取 xlsx: {}", e))?;
 
     let sheet_names = workbook.sheet_names().to_vec();

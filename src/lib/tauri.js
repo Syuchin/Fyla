@@ -1,10 +1,13 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
-import { Command } from '@tauri-apps/plugin-shell'
+import { getVersion } from '@tauri-apps/api/app'
+import { emitTo } from '@tauri-apps/api/event'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { Command, open as openShell } from '@tauri-apps/plugin-shell'
 import { t } from './i18n.js'
 
 export async function pickFolder() {
-  const selected = await open({
+  const selected = await openDialog({
     directory: true,
     multiple: false,
     title: t('files.pickFolder'),
@@ -13,11 +16,22 @@ export async function pickFolder() {
 }
 
 export async function pickPdfFiles() {
-  const selected = await open({
+  const selected = await openDialog({
     directory: false,
     multiple: true,
     title: t('papers.pickPapers'),
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (!selected) return []
+  return Array.isArray(selected) ? selected : [selected]
+}
+
+export async function pickImageFiles() {
+  const selected = await openDialog({
+    directory: false,
+    multiple: true,
+    title: t('papers.chatImagePickerTitle'),
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff'] }],
   })
   if (!selected) return []
   return Array.isArray(selected) ? selected : [selected]
@@ -37,6 +51,10 @@ export async function extractFileText(path) {
 
 export async function readPaperArchiveMarkdown(path) {
   return await invoke('read_paper_archive_markdown', { path })
+}
+
+export async function readBinaryFile(path) {
+  return await invoke('read_file_bytes', { path })
 }
 
 export async function generateFilename(text, config, filePath) {
@@ -63,6 +81,10 @@ export async function getConfig() {
   return await invoke('get_config')
 }
 
+export async function getAppVersion() {
+  return await getVersion()
+}
+
 export async function saveConfig(config) {
   return await invoke('save_config', { config })
 }
@@ -83,6 +105,14 @@ export async function testPaperConnection(config) {
   return await invoke('test_paper_connection', { config })
 }
 
+export async function getPaperEmbeddingStatus(config) {
+  return await invoke('get_paper_embedding_status', { config })
+}
+
+export async function testPaperEmbeddingConnection(config) {
+  return await invoke('test_paper_embedding_connection', { config })
+}
+
 export async function generatePaperReviewsStream(paths, config, projectName, onEvent) {
   const channel = new Channel()
   channel.onmessage = (msg) => onEvent(msg)
@@ -99,6 +129,50 @@ export async function addHistory(entry) {
 
 export async function getPaperHistory() {
   return await invoke('get_paper_history')
+}
+
+export async function preparePaperChatSession(sourcePath, savedPath, title, config) {
+  return await invoke('prepare_paper_chat_session', { sourcePath, savedPath, title, config })
+}
+
+export async function createPaperChatSession(sourcePath, savedPath, title, config) {
+  return await invoke('create_paper_chat_session', { sourcePath, savedPath, title, config })
+}
+
+export async function getPaperChatHistory(sessionId) {
+  return await invoke('get_paper_chat_history', { sessionId })
+}
+
+export async function clearPaperChatSession(sessionId) {
+  return await invoke('clear_paper_chat_session', { sessionId })
+}
+
+export async function stopPaperChatStream(sessionId) {
+  return await invoke('stop_paper_chat_stream', { sessionId })
+}
+
+export async function streamPaperChatReply(sessionId, question, attachments, images, selectionContext, config, onEvent) {
+  const channel = new Channel()
+  channel.onmessage = msg => onEvent(msg)
+  await invoke('stream_paper_chat_reply', {
+    sessionId,
+    question,
+    attachments,
+    images,
+    selectionContext,
+    config,
+    onEvent: channel,
+  })
+}
+
+export async function retryPaperChatTurn(sessionId, config, onEvent) {
+  const channel = new Channel()
+  channel.onmessage = msg => onEvent(msg)
+  await invoke('retry_paper_chat_turn', {
+    sessionId,
+    config,
+    onEvent: channel,
+  })
 }
 
 export async function addPaperHistory(entry) {
@@ -121,10 +195,78 @@ export async function setBadgeCount(count) {
   return await invoke('set_badge_count', { count })
 }
 
+export async function openPaperChatWindow(payload) {
+  let win = await WebviewWindow.getByLabel('paper-chat')
+  if (!win) {
+    win = new WebviewWindow('paper-chat')
+    await new Promise((resolve, reject) => {
+      const cleanup = []
+      win.once('tauri://created', () => {
+        cleanup.forEach(fn => fn())
+        resolve()
+      }).then(unlisten => cleanup.push(unlisten))
+      win.once('tauri://error', event => {
+        cleanup.forEach(fn => fn())
+        reject(new Error(String(event.payload)))
+      }).then(unlisten => cleanup.push(unlisten))
+    })
+  }
+  await win.show()
+  await win.setFocus()
+  await emitTo('paper-chat', 'paper-chat:activate', payload)
+  return win
+}
+
+export async function hidePaperChatWindow() {
+  const win = await WebviewWindow.getByLabel('paper-chat')
+  if (!win) return
+  await win.hide()
+}
+
+export async function focusPaperChatWindow(payload = null) {
+  const win = await WebviewWindow.getByLabel('paper-chat')
+  if (!win) return null
+  if (payload) {
+    await emitTo('paper-chat', 'paper-chat:activate', payload)
+  }
+  await win.show()
+  await win.setFocus()
+  return win
+}
+
 export async function revealInFinder(path) {
   try {
     await Command.create('reveal-in-finder', ['-R', path]).execute()
   } catch (_) {}
+}
+
+export function isAllowedExternalUrl(input) {
+  const value = String(input || '').trim()
+  if (!value) return false
+
+  let parsed
+  try {
+    parsed = new URL(value)
+  } catch (_) {
+    return false
+  }
+
+  if (parsed.protocol === 'https:') return true
+  if (parsed.protocol === 'http:' && parsed.hostname === 'localhost') return true
+  return false
+}
+
+export async function openExternalUrl(input) {
+  const value = String(input || '').trim()
+  if (!isAllowedExternalUrl(value)) {
+    throw new Error(t('errors.invalidExternalUrl'))
+  }
+
+  try {
+    await openShell(value)
+  } catch (_) {
+    throw new Error(t('errors.openExternalFailed'))
+  }
 }
 
 export async function copyText(text) {

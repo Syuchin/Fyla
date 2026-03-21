@@ -3,6 +3,7 @@ import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
 const MODES = {
   compact: { width: 560, height: 480 },
   paper: { width: 800, height: 660 },
+  workspace: { width: 1320, height: 860 },
 }
 
 const SIZE_TOLERANCE = 12
@@ -12,7 +13,8 @@ let appliedMode = null
 let pending = Promise.resolve()
 
 function getModeForPage(page) {
-  return page === 'papers' || page === 'paper-detail' ? 'paper' : 'compact'
+  if (page === 'paper-detail') return 'workspace'
+  return page === 'papers' ? 'paper' : 'compact'
 }
 
 export function syncWindowMode(page) {
