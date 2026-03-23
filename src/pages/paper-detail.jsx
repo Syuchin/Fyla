@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { closePaperDetail, paperHistory, paperTasks } from '../lib/paperQueue.js'
 import {
   collectTextNodesFromRoots,
@@ -29,11 +27,7 @@ import { t } from '../lib/i18n.js'
 import { PaperChatDock } from '../components/PaperChatDock.jsx'
 import { PaperPdfViewer } from '../components/PaperPdfViewer.jsx'
 import { SelectionAskBubble } from '../components/SelectionAskBubble.jsx'
-
-marked.setOptions({
-  gfm: true,
-  breaks: false,
-})
+import { renderMarkdownToHtml } from '../lib/renderMarkdown.js'
 
 const REPORT_SNIPPET_HIGHLIGHT_TYPE = 'report-snippet'
 const TEMP_HIGHLIGHT_DURATION_MS = 2200
@@ -178,7 +172,7 @@ export function PaperDetailPage() {
 
     try {
       const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const html = DOMPurify.sanitize(marked.parse(markdown))
+      const html = renderMarkdownToHtml(markdown)
       setRenderedReport(decorateReportHtml(html))
       const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt
       console.info('[paper-perf] render_report_html', {

@@ -2768,6 +2768,17 @@ html, body {
   color: #22212a;
 }
 
+.paper-report-prose,
+.paper-report-prose * {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
+.paper-report-prose {
+  cursor: text;
+}
+
 .paper-prose h1,
 .paper-prose h2,
 .paper-prose h3,
@@ -2949,6 +2960,21 @@ html, body {
   box-shadow: none;
   border-radius: 0;
   padding: 28px 28px 48px;
+}
+
+.paper-report-prose .katex {
+  font-size: 1em;
+}
+
+.paper-report-prose .katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.1em 0;
+}
+
+.paper-report-prose .katex-display > .katex {
+  min-width: max-content;
 }
 
 .paper-report-prose h1,
@@ -4061,6 +4087,21 @@ html, body {
 
 .paper-chat-markdown > :last-child {
   margin-bottom: 0;
+}
+
+.paper-chat-markdown .katex {
+  font-size: 1em;
+}
+
+.paper-chat-markdown .katex-display {
+  margin: 0.7em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.1em 0;
+}
+
+.paper-chat-markdown .katex-display > .katex {
+  min-width: max-content;
 }
 
 .paper-chat-markdown h1,

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.1
+
+- Fixed LaTeX math rendering in paper Markdown reports across both the report reader and paper chat
+- Added support for `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` math delimiters without breaking code spans or fenced code blocks
+- Restored text selection inside Markdown reports while keeping PDF text selection disabled
+
 ## v1.2.0
 
 - Fixed release version metadata so app version, updater manifest, and GitHub release assets stay in sync

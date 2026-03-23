@@ -1,6 +1,6 @@
 {
   "name": "fyla",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,7 +23,9 @@
     "@tauri-apps/plugin-shell": "^2.2.0",
     "@tauri-apps/plugin-updater": "^2.10.0",
     "dompurify": "^3.3.3",
+    "katex": "^0.16.40",
     "marked": "^17.0.4",
+    "marked-katex-extension": "^5.1.7",
     "pdfjs-dist": "^5.5.207",
     "preact": "^10.25.4",
     "preact-i18n": "^2.4.0-preactx"

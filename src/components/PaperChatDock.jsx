@@ -1,5 +1,3 @@
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   clearPaperChatDraftQuote,
@@ -39,17 +37,13 @@ import {
   showToast,
 } from '../lib/store.js'
 import { friendlyError, openExternalUrl } from '../lib/tauri.js'
+import { renderMarkdownToHtml } from '../lib/renderMarkdown.js'
 
 const INLINE_MENTION_GLOBAL_PATTERN = /\[@([^\]\n]+)\]/g
 const PDF_CITATION_PREFIX = '@论文PDF/第'
 const REPORT_CITATION_PREFIX = '@解读报告/'
 const CITATION_SNIPPET_OPEN = '『'
 const CITATION_SNIPPET_CLOSE = '』'
-
-marked.setOptions({
-  gfm: true,
-  breaks: false,
-})
 
 function renderPlainTextContent(content) {
   return String(content || '')
@@ -398,10 +392,8 @@ function removeResolvedMentionToken(value, token) {
 }
 
 function renderAssistantContent(content) {
-  const rawHtml = marked.parse(String(content || ''))
-  const sanitizedHtml = DOMPurify.sanitize(typeof rawHtml === 'string' ? rawHtml : String(rawHtml || ''))
   const parser = new DOMParser()
-  const doc = parser.parseFromString(`<body>${sanitizedHtml}</body>`, 'text/html')
+  const doc = parser.parseFromString(`<body>${renderMarkdownToHtml(content)}</body>`, 'text/html')
   decorateInlineCitations(doc.body)
   return doc.body.innerHTML
 }
@@ -416,7 +408,7 @@ function decorateInlineCitations(root) {
       acceptNode(node) {
         if (!node.nodeValue?.includes('@')) return NodeFilter.FILTER_REJECT
         const parent = node.parentElement
-        if (!parent || parent.closest('code, pre')) return NodeFilter.FILTER_REJECT
+        if (!parent || parent.closest('code, pre, .katex, math, annotation')) return NodeFilter.FILTER_REJECT
         return NodeFilter.FILTER_ACCEPT
       },
     },
