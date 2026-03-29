@@ -7,6 +7,8 @@ use std::sync::Mutex;
 static HISTORY_LOCK: Mutex<()> = Mutex::new(());
 static PAPER_HISTORY_LOCK: Mutex<()> = Mutex::new(());
 static PAPER_CHAT_SESSION_LOCK: Mutex<()> = Mutex::new(());
+const DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE: &str =
+    include_str!("../../src/lib/paper-review-prompt-template.txt");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -44,6 +46,7 @@ pub struct AppConfig {
     pub paper_embedding_openai_base_url: String,
     pub paper_fulltext_token_limit: u32,
     pub paper_archive_root: String,
+    pub paper_review_prompt_template: String,
 }
 
 fn default_naming_style() -> String {
@@ -72,6 +75,25 @@ fn default_paper_fulltext_token_limit() -> u32 {
 }
 fn default_paper_archive_root() -> String {
     "/Users/chenghaoyang/Local/papers".into()
+}
+pub fn default_paper_review_prompt_template() -> String {
+    DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE.trim().to_string()
+}
+
+fn normalize_paper_review_prompt_template_value(value: &str) -> String {
+    if value.trim().is_empty() {
+        default_paper_review_prompt_template()
+    } else {
+        value.to_string()
+    }
+}
+
+impl AppConfig {
+    fn normalized(mut self) -> Self {
+        self.paper_review_prompt_template =
+            normalize_paper_review_prompt_template_value(&self.paper_review_prompt_template);
+        self
+    }
 }
 
 impl Default for AppConfig {
@@ -109,6 +131,7 @@ impl Default for AppConfig {
             paper_embedding_openai_base_url: default_openai_base_url(),
             paper_fulltext_token_limit: default_paper_fulltext_token_limit(),
             paper_archive_root: default_paper_archive_root(),
+            paper_review_prompt_template: default_paper_review_prompt_template(),
         }
     }
 }
@@ -122,7 +145,9 @@ fn config_path() -> PathBuf {
 pub fn load_config() -> AppConfig {
     let path = config_path();
     if let Ok(data) = fs::read_to_string(&path) {
-        serde_json::from_str(&data).unwrap_or_default()
+        serde_json::from_str::<AppConfig>(&data)
+            .unwrap_or_default()
+            .normalized()
     } else {
         AppConfig::default()
     }
@@ -134,7 +159,7 @@ pub fn save_config(config: &AppConfig) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let data = serde_json::to_string_pretty(config)?;
+    let data = serde_json::to_string_pretty(&config.clone().normalized())?;
     fs::write(path, data)?;
     Ok(())
 }
@@ -412,4 +437,30 @@ fn normalize_paper_chat_session_entry(mut entry: PaperChatSessionEntry) -> Paper
         entry.updated_at = entry.created_at.clone();
     }
     entry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_paper_review_prompt_is_available() {
+        let template = default_paper_review_prompt_template();
+        assert!(template.contains("## Part A"));
+        assert!(template.contains("## Part B"));
+    }
+
+    #[test]
+    fn blank_paper_review_prompt_falls_back_to_default() {
+        let config = AppConfig {
+            paper_review_prompt_template: "   \n".into(),
+            ..AppConfig::default()
+        }
+        .normalized();
+
+        assert_eq!(
+            config.paper_review_prompt_template,
+            default_paper_review_prompt_template()
+        );
+    }
 }

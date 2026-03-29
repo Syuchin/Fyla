@@ -16,6 +16,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { changelog } from '../lib/changelog.js'
 import { t, lang, setLang } from '../lib/i18n.js'
 import { checkForUpdateManual } from '../lib/updater.js'
+import { clearWindowModeOverride, setWindowModeOverride } from '../lib/windowMode.js'
+import defaultPaperReviewPromptTemplateRaw from '../lib/paper-review-prompt-template.txt?raw'
+
+const DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE = defaultPaperReviewPromptTemplateRaw.trim()
+const SETTINGS_TABS = ['general', 'ai', 'papers', 'watch', 'about']
 
 export function SettingsPage() {
   const c = config.value
@@ -30,6 +35,11 @@ export function SettingsPage() {
   const [testingPaperEmbedding, setTestingPaperEmbedding] = useState(false)
   const [paperEmbeddingTestResult, setPaperEmbeddingTestResult] = useState(null)
   const [paperEmbeddingStatus, setPaperEmbeddingStatus] = useState(null)
+  const [showPaperReviewPromptEditor, setShowPaperReviewPromptEditor] = useState(false)
+  const [paperReviewPromptDraft, setPaperReviewPromptDraft] = useState(
+    c.paperReviewPromptTemplate || DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE,
+  )
+  const [activeSettingsTab, setActiveSettingsTab] = useState('general')
 
   useEffect(() => {
     invoke('is_autostart_enabled').then(setAutoStart).catch(() => {})
@@ -53,6 +63,45 @@ export function SettingsPage() {
     c.paperEmbeddingOpenaiKey,
     c.paperEmbeddingOpenaiModel,
   ])
+
+  useEffect(() => {
+    setPaperReviewPromptDraft(c.paperReviewPromptTemplate || DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE)
+  }, [c.paperReviewPromptTemplate])
+
+  useEffect(() => {
+    if (!showPaperReviewPromptEditor) return undefined
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        closePaperReviewPromptEditor()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showPaperReviewPromptEditor, c.paperReviewPromptTemplate])
+
+  useEffect(() => {
+    if (!showPaperReviewPromptEditor) return undefined
+
+    let cancelled = false
+
+    setWindowModeOverride('prompt').catch(() => {})
+
+    requestAnimationFrame(() => {
+      if (cancelled) return
+      setWindowModeOverride('prompt').catch(() => {})
+    })
+
+    return () => {
+      cancelled = true
+      clearWindowModeOverride('settings').catch(() => {})
+    }
+  }, [showPaperReviewPromptEditor])
+
+  useEffect(() => () => {
+    clearWindowModeOverride('settings').catch(() => {})
+  }, [])
 
   function update(key, value) {
     const next = { ...config.value, [key]: value }
@@ -140,11 +189,58 @@ export function SettingsPage() {
     if (path) update('paperArchiveRoot', path)
   }
 
+  function normalizePaperReviewPromptValue(value) {
+    return value.trim() ? value : DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE
+  }
+
+  function openPaperReviewPromptEditor() {
+    setPaperReviewPromptDraft(c.paperReviewPromptTemplate || DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE)
+    setShowPaperReviewPromptEditor(true)
+    setWindowModeOverride('prompt').catch(() => {})
+  }
+
+  function closePaperReviewPromptEditor() {
+    setShowPaperReviewPromptEditor(false)
+    setPaperReviewPromptDraft(c.paperReviewPromptTemplate || DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE)
+    clearWindowModeOverride('settings').catch(() => {})
+  }
+
+  function handleSavePaperReviewPrompt() {
+    const nextValue = normalizePaperReviewPromptValue(paperReviewPromptDraft)
+    setPaperReviewPromptDraft(nextValue)
+    update('paperReviewPromptTemplate', nextValue)
+    setShowPaperReviewPromptEditor(false)
+    clearWindowModeOverride('settings').catch(() => {})
+  }
+
+  function handleResetPaperReviewPrompt() {
+    setPaperReviewPromptDraft(DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE)
+    update('paperReviewPromptTemplate', DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE)
+    showToast(t('settings.paperReviewPromptResetDone'))
+  }
+
   return (
     <div class="main">
       <div class="settings-page">
+        <div class="settings-tabs-shell">
+          <div class="settings-tabs" role="tablist" aria-label={t('settings.settingsTabs')}>
+            {SETTINGS_TABS.map(tab => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={activeSettingsTab === tab}
+                class={`settings-tab ${activeSettingsTab === tab ? 'active' : ''}`}
+                onClick={() => setActiveSettingsTab(tab)}
+              >
+                {t(`settings.tab${tab.charAt(0).toUpperCase()}${tab.slice(1)}`)}
+              </button>
+            ))}
+          </div>
+        </div>
 
-        {/* General */}
+        {activeSettingsTab === 'general' && (
+        <>
         <div class="settings-section">
           <div class="settings-section-title">{t('settings.general')}</div>
           <div class="settings-row">
@@ -184,8 +280,11 @@ export function SettingsPage() {
             </button>
           </div>
         </div>
+        </>
+        )}
 
-        {/* AI Provider */}
+        {activeSettingsTab === 'ai' && (
+        <>
         <div class="settings-section">
           <div class="settings-section-title">{t('settings.aiProvider')}</div>
           <div class="settings-row">
@@ -291,7 +390,6 @@ export function SettingsPage() {
           </div>
         </div>
 
-        {/* Naming Rules */}
         <div class="settings-section">
           <div class="settings-section-title">{t('settings.namingRules')}</div>
           <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
@@ -438,7 +536,10 @@ export function SettingsPage() {
             </>
           )}
         </div>
+        </>
+        )}
 
+        {activeSettingsTab === 'papers' && (
         <div class="settings-section settings-section-paper">
           <div class="settings-paper-header">
             <div class="settings-paper-header-copy">
@@ -556,6 +657,27 @@ export function SettingsPage() {
                   onClick={handleTestPaperConnection}
                 >
                   {testingPaper ? t('settings.testing') : t('settings.testPaperConnection')}
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-paper-card">
+              <div class="settings-paper-card-title">{t('settings.paperReviewPrompt')}</div>
+              <p class="settings-paper-card-subtitle">{t('settings.paperReviewPromptHint')}</p>
+              <div class="settings-paper-state">
+                {t('settings.paperReviewPromptLocked')}
+              </div>
+
+              <div class="settings-paper-footer">
+                <span class="settings-paper-status settings-paper-status-placeholder">
+                  {t('settings.paperReviewPromptHint')}
+                </span>
+                <button
+                  type="button"
+                  class="btn btn-secondary settings-paper-test-btn"
+                  onClick={openPaperReviewPromptEditor}
+                >
+                  {t('settings.paperReviewPromptEdit')}
                 </button>
               </div>
             </div>
@@ -770,8 +892,9 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
+        )}
 
-        {/* Auto Watch */}
+        {activeSettingsTab === 'watch' && (
         <div class="settings-section">
           <div class="settings-section-title">{t('settings.autoWatch')}</div>
           <div class="settings-row">
@@ -862,8 +985,9 @@ export function SettingsPage() {
             )}
           </div>
         </div>
+        )}
 
-        {/* About */}
+        {activeSettingsTab === 'about' && (
         <div class="settings-section about-section">
           <div class="about-version">
             <span class="about-version-left" onClick={() => setShowChangelog(!showChangelog)}>
@@ -887,8 +1011,74 @@ export function SettingsPage() {
             </div>
           )}
         </div>
+        )}
 
       </div>
+
+      {showPaperReviewPromptEditor && (
+        <div class="settings-prompt-overlay" onClick={closePaperReviewPromptEditor}>
+          <div
+            class="settings-prompt-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="paper-review-prompt-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div class="settings-prompt-header">
+              <div class="settings-prompt-header-copy">
+                <h3 id="paper-review-prompt-title" class="settings-prompt-title">
+                  {t('settings.paperReviewPrompt')}
+                </h3>
+                <p class="settings-prompt-subtitle">{t('settings.paperReviewPromptHint')}</p>
+              </div>
+              <button
+                type="button"
+                class="btn btn-ghost settings-prompt-close"
+                onClick={closePaperReviewPromptEditor}
+              >
+                {t('settings.paperReviewPromptClose')}
+              </button>
+            </div>
+
+            <div class="settings-prompt-state">
+              {t('settings.paperReviewPromptLocked')}
+            </div>
+
+            <textarea
+              class="settings-textarea settings-prompt-textarea"
+              value={paperReviewPromptDraft}
+              onInput={event => setPaperReviewPromptDraft(event.target.value)}
+              placeholder={DEFAULT_PAPER_REVIEW_PROMPT_TEMPLATE}
+            />
+
+            <div class="settings-prompt-actions">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                onClick={handleResetPaperReviewPrompt}
+              >
+                {t('settings.paperReviewPromptReset')}
+              </button>
+              <div class="settings-prompt-actions-right">
+                <button
+                  type="button"
+                  class="btn btn-ghost"
+                  onClick={closePaperReviewPromptEditor}
+                >
+                  {t('settings.paperReviewPromptCancel')}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  onClick={handleSavePaperReviewPrompt}
+                >
+                  {t('settings.paperReviewPromptSave')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

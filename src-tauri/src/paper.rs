@@ -14,6 +14,8 @@ const PAPER_CONCURRENCY: usize = 3;
 const FYLA_META_MARKER: &str = "<<<FYLA_META>>>";
 const FYLA_MARKDOWN_MARKER: &str = "<<<FYLA_MARKDOWN>>>";
 const STOPPED_REASON: &str = "__FYLA_PAPER_REVIEW_STOPPED__";
+const DEFAULT_REVIEW_PROMPT_TEMPLATE: &str =
+    include_str!("../../src/lib/paper-review-prompt-template.txt");
 
 fn paper_review_cancel_registry()
 -> &'static Mutex<std::collections::HashMap<String, watch::Sender<bool>>> {
@@ -296,7 +298,11 @@ async fn review_single(
     });
 
     let paper_text = trim_references_for_prompt(&extracted.text);
-    let prompt = build_review_prompt(&file_name, &paper_text);
+    let prompt = build_review_prompt(
+        &file_name,
+        &paper_text,
+        &config.paper_review_prompt_template,
+    );
     let mut preview = PreviewAccumulator::default();
     let response =
         call_review_model_stream(&config, &file_name, &prompt, &mut cancel_rx, |delta| {
@@ -900,7 +906,17 @@ fn is_review_stopped_error(err: &anyhow::Error) -> bool {
     err.to_string().contains(STOPPED_REASON)
 }
 
-fn build_review_prompt(file_name: &str, text: &str) -> String {
+fn resolve_review_prompt_template(template: &str) -> &str {
+    let trimmed = template.trim();
+    if trimmed.is_empty() {
+        DEFAULT_REVIEW_PROMPT_TEMPLATE.trim()
+    } else {
+        trimmed
+    }
+}
+
+fn build_review_prompt(file_name: &str, text: &str, template: &str) -> String {
+    let review_template = resolve_review_prompt_template(template);
     format!(
         "你只能依据我提供的 PDF 提取文本进行分析，禁止联网、禁止引用外部资料、禁止脑补论文未提供的信息。\n\
 你必须严格按以下格式输出，不要添加代码块围栏，不要添加额外解释：\n\
@@ -913,73 +929,7 @@ fn build_review_prompt(file_name: &str, text: &str) -> String {
 - year：4 位年份；如果 PDF 中无法可靠确认，返回空字符串。\n\
 - venue：会议或期刊简称；如果 PDF 中无法可靠确认，返回空字符串。\n\
 - summary：1-2 句简短总结。\n\n\
-你是一名大模型（LLM）方向的资深研究者与技术审稿人。我会上传一篇论文的 PDF，请你完整阅读后，按照以下结构对论文进行系统化解读。要求：所有结论必须基于论文原文，带具体数字和证据，不要空洞概括。输出使用 Markdown 格式。\n\n\
-**引用规范**：提到其他论文时，不要用\"Yi et al. (2023)\"这种人名引用格式，而是用该论文提出的方法名或框架名（如 DPO、RLHF、ReAct）。如果没有明确的方法名，则用论文标题。目的是让读者一眼就能识别出是哪篇工作。\n\n\
-请按以下结构输出：\n\n\
----\n\n\
-## Part A：速读\n\n\
-### 1. 论文信息\n\n\
-- **标题**：论文原标题\n\
-- **作者/单位**：第一作者及主要单位\n\
-- **发表**：会议/期刊，年份\n\
-- **链接**：原文链接（如有）\n\
-- **代码/数据**：开源地址（如有）\n\n\
-### 2. TL;DR（≤3 句话）\n\n\
-用三句话概括：解决什么问题？怎么做的？效果如何（带数字）？\n\n\
-### 3. Core Insight（≤2 句话）\n\n\
-提炼这篇论文最核心的 intellectual contribution。不要复述摘要，而是回答：作者看到了什么别人没看到的东西？发现了什么现象、提出了什么新视角、或建立了什么之前没有的联系？\n\n\
-### 4. 关键结果速览\n\n\
-列出 3-5 个最重要的实验结论，每条一句话带数字。\n\n\
----\n\n\
-## Part B：精读\n\n\
-### 5. 问题与动机\n\n\
-- **任务场景**：这篇论文处理的是什么任务？属于哪个研究方向？目标受众和应用场景是什么？\n\
-- **现有方法的不足**：之前的方法存在什么具体问题？用论文中给出的数据或例子说明，不要泛泛而谈。\n\
-- **核心假设/洞察**：作者基于什么观察或假设出发？这个假设有没有前置的实验验证或理论依据？\n\
-- **与最相近工作的区别**：列出论文提到的 2-3 篇最相关的工作，逐一说明本文与它们的核心差异。要说清楚差异的维度（问题定义不同、方法路线不同、评估范围不同等），不要笼统说\"本文更好\"。\n\n\
-### 6. Research Questions\n\n\
-从论文中提炼出作者实际想回答的核心问题。很多论文不会显式列出 RQ，你需要从 introduction 的贡献列表、实验章节的组织结构、以及消融实验的设计中归纳出来。通常 2-4 个。\n\n\
-- **RQ1**：\n\
-- **RQ2**：\n\
-- **RQ3**：\n\n\
-### 7. 方法\n\n\
-**7.1 整体框架**\n\n\
-用 3-5 句话概括方法的完整流程和核心思路。如果是多阶段 pipeline，说清楚每个阶段的输入、输出和核心操作。\n\n\
-**7.2 关键设计选择**\n\n\
-找出方法中最重要的 2-3 个设计决策。对每个决策，回答：\n\
-- 具体做了什么？\n\
-- 为什么选择这个方案而不是显而易见的替代方案？\n\
-- 这个选择带来了什么 trade-off？\n\n\
-**7.3 技术细节**\n\n\
-根据论文实际内容展开，只写论文涉及的部分，不要硬凑。可能涉及但不限于：训练策略与损失函数设计、数据构造与质量控制、推理流程中的特殊设计、核心公式（逐符号解释含义和设计动机）等。\n\n\
-### 8. 实验设置\n\n\
-- **数据集/Benchmark**：用了哪些评估数据集？各自衡量什么能力？数据规模和来源？\n\
-- **评估指标**：每个 metric 具体衡量什么？为什么选这些指标？如果使用了 LLM-as-judge，说明 judge 模型和评分标准。\n\
-- **Baselines**：对比了哪些方法？这些 baseline 是否足够强和足够新？有没有明显应该比但没比的？\n\
-- **其他关键配置**：列出影响结果的重要实验设置（如模型规模、关键超参数等）。\n\n\
-### 9. 实验结果与分析\n\n\
-**9.1 主要结果**\n\n\
-- 在核心 benchmark 上的表现，必须带具体数字。\n\
-- 与最强 baseline 的差距是多少？\n\
-- 在不同设置下（如不同规模、不同任务）表现是否一致？有没有方法失效的场景？\n\n\
-**9.2 按 RQ 组织的深入分析**\n\n\
-对上面提炼的每个 RQ，逐一分析：\n\n\
-**RQ1**：\n\
-- 用了哪些实验或消融来回答这个问题？实验设计是否合理？\n\
-- 关键数字是什么？\n\
-- 能得出什么结论？支撑是否充分？\n\n\
-**RQ2**：\n\
-- （同上结构）\n\n\
-**RQ3**：\n\
-- （同上结构）\n\n\
-**9.3 存疑之处**\n\n\
-以审稿人视角审视：对比是否公平？有没有 cherry-picking 嫌疑？有没有缺失的关键实验（该做但没做的消融、该比但没比的 baseline）？评估本身是否可靠？\n\n\
-### 10. 一句话总结\n\n\
-用一句话概括这篇论文的核心贡献和价值定位。\n\n\
-补充要求：\n\
-- 若 PDF 中没有可靠提供链接、代码、数据、年份或 venue，请写“论文未提供”或保留为空，不要猜测。\n\
-- 所有结论都必须锚定在下方 PDF 文本，不得编造实验结果。\n\
-- 主体使用中文表达，方法名、模型名、数据集名、指标名保留英文。\n\n\
+{review_template}\n\n\
 文件名：{file_name}\n\n\
 以下是从 PDF 中提取的全文文本：\n{text}"
     )
@@ -1176,4 +1126,31 @@ fn normalize_optional_project(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blank_template_uses_default_review_prompt_template() {
+        let resolved = resolve_review_prompt_template("   \n");
+        assert!(resolved.contains("## Part A"));
+        assert!(resolved.contains("## Part B"));
+    }
+
+    #[test]
+    fn custom_template_keeps_protocol_markers_and_body() {
+        let prompt = build_review_prompt(
+            "demo.pdf",
+            "paper body",
+            "请重点关注实验设计，并保持输出结构不变。",
+        );
+
+        assert!(prompt.contains(FYLA_META_MARKER));
+        assert!(prompt.contains(FYLA_MARKDOWN_MARKER));
+        assert!(prompt.contains("请重点关注实验设计"));
+        assert!(prompt.contains("文件名：demo.pdf"));
+        assert!(prompt.contains("以下是从 PDF 中提取的全文文本：\npaper body"));
+    }
 }
