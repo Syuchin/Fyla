@@ -102,6 +102,7 @@ export function PapersPage() {
                   <span class="papers-stat-chip">{stats.processing} {t('papers.processing')}</span>
                   <span class="papers-stat-chip">{stats.done} {t('papers.done')}</span>
                   <span class="papers-stat-chip">{stats.error} {t('papers.failed')}</span>
+                  <span class="papers-stat-chip">{stats.cancelled} {t('papers.cancelled')}</span>
                   <span class="papers-stat-chip">{t('papers.totalElapsed', { time: formatMs(stats.totalElapsedMs) })}</span>
                 </div>
               </div>

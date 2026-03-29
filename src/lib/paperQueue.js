@@ -1,6 +1,6 @@
 import { computed, signal } from '@preact/signals'
 import { config, currentPage, currentPaperDetailId, paperProjectName, papersActiveTab, showToast } from './store.js'
-import { addPaperHistory, clearPaperHistoryItems, friendlyError, generatePaperReviewsStream, getPaperHistory, removePaperHistoryItem as removePaperHistoryRecord } from './tauri.js'
+import { addPaperHistory, clearPaperHistoryItems, friendlyError, generatePaperReviewsStream, getPaperHistory, removePaperHistoryItem as removePaperHistoryRecord, stopPaperReview } from './tauri.js'
 import { t } from './i18n.js'
 import { getPaperCharCountFromMarkdown } from './paperChars.js'
 
@@ -17,9 +17,10 @@ export const paperStats = computed(() => {
   return {
     total: list.length,
     queued: list.filter(task => task.status === 'queued').length,
-    processing: list.filter(task => ['extracting', 'generating', 'saving'].includes(task.status)).length,
+    processing: list.filter(task => ['extracting', 'generating', 'saving', 'cancelling'].includes(task.status)).length,
     done: list.filter(task => task.status === 'done').length,
     error: list.filter(task => task.status === 'error').length,
+    cancelled: list.filter(task => task.status === 'cancelled').length,
     totalElapsedMs: list.reduce((sum, task) => sum + (task.elapsedMs || 0), 0),
   }
 })
@@ -72,6 +73,39 @@ function updateTaskWith(id, updater) {
 
 function findTaskIdByPath(path) {
   return paperTasks.value.find(task => task.path === path)?.id || null
+}
+
+function getTaskById(id) {
+  return paperTasks.value.find(task => task.id === id) || null
+}
+
+function isTerminalStatus(status) {
+  return ['done', 'error', 'cancelled'].includes(status)
+}
+
+function getBatchFailurePhase(task) {
+  if (task?.lastPhase) return task.lastPhase
+  if (task?.status === 'queued') return 'queued'
+  return 'generating'
+}
+
+function markBatchTasksFailed(pathSet, message) {
+  const failedAt = Date.now()
+  paperTasks.value = paperTasks.value.map(task => {
+    if (!pathSet.has(task.path)) return task
+    if (isTerminalStatus(task.status)) return task
+    return {
+      ...task,
+      status: 'error',
+      message: '',
+      error: message,
+      errorPhase: getBatchFailurePhase(task),
+      cancelledPhase: '',
+      endedAt: failedAt,
+      elapsedMs: task.startedAt ? Math.max(0, failedAt - task.startedAt) : task.elapsedMs || 0,
+      canOpenPreview: !!task.previewMarkdown,
+    }
+  })
 }
 
 function normalizePreviewMeta(meta) {
@@ -169,6 +203,9 @@ export function enqueuePaperPaths(paths, source = 'pick') {
       status: 'queued',
       message: '',
       error: '',
+      lastPhase: 'queued',
+      errorPhase: '',
+      cancelledPhase: '',
       elapsedMs: 0,
       startedAt: null,
       endedAt: null,
@@ -205,7 +242,9 @@ export async function startPaperBatch() {
 
   batchPromise = generatePaperReviewsStream(paths, config.value, projectName, handlePaperEvent)
     .catch(err => {
-      showToast(t('papers.batchFailed') + ': ' + friendlyError(err))
+      const message = friendlyError(err)
+      markBatchTasksFailed(pathSet, message)
+      showToast(t('papers.batchFailed') + ': ' + message)
     })
     .finally(() => {
       batchPromise = null
@@ -227,6 +266,7 @@ function handlePaperEvent(message) {
 
   const taskId = sourcePath ? findTaskIdByPath(sourcePath) : null
   if (!taskId && type !== 'batchFinished') return
+  const currentTask = taskId ? getTaskById(taskId) : null
 
   switch (type) {
     case 'itemStarted':
@@ -234,6 +274,9 @@ function handlePaperEvent(message) {
         status: 'extracting',
         message: t('papers.phaseExtracting'),
         error: '',
+        lastPhase: 'extracting',
+        errorPhase: '',
+        cancelledPhase: '',
         startedAt: Date.now(),
         endedAt: null,
         previewMarkdown: '',
@@ -248,12 +291,14 @@ function handlePaperEvent(message) {
       updateTask(taskId, {
         status: data.phase,
         message: data.message,
+        lastPhase: data.phase || currentTask?.lastPhase || 'queued',
       })
       break
     case 'itemPreviewStarted':
       updateTask(taskId, {
         status: 'generating',
         message: t('papers.phaseGenerating'),
+        lastPhase: 'generating',
         previewMarkdown: '',
         previewMeta: null,
         previewChars: 0,
@@ -265,6 +310,8 @@ function handlePaperEvent(message) {
     case 'itemPreviewReady':
       updateTask(taskId, {
         status: 'generating',
+        message: t('papers.phaseGenerating'),
+        lastPhase: 'generating',
         previewChars: data.previewChars || 0,
         previewMeta: normalizePreviewMeta(data.previewMeta || data.preview_meta),
         previewUpdatedAt: Date.now(),
@@ -276,6 +323,7 @@ function handlePaperEvent(message) {
         ...task,
         status: 'generating',
         message: t('papers.phaseGenerating'),
+        lastPhase: 'generating',
         previewMarkdown: (task.previewMarkdown || '') + (data.delta || ''),
         previewChars: data.previewChars || ((task.previewMarkdown || '').length + (data.delta || '').length),
         previewUpdatedAt: Date.now(),
@@ -301,23 +349,47 @@ function handlePaperEvent(message) {
         canOpenPreview: true,
         result: normalizedResult,
         error: '',
+        lastPhase: 'done',
+        errorPhase: '',
+        cancelledPhase: '',
       })
       void pushPaperHistory(
         paperTasks.value.find(task => task.id === taskId),
         normalizedResult,
       )
       break
-    case 'itemError':
+    case 'itemError': {
+      const errorPhase = data.phase || currentTask?.lastPhase || 'generating'
       updateTask(taskId, {
         status: 'error',
         message: '',
         elapsedMs: data.elapsedMs || data.elapsed_ms || 0,
         endedAt: Date.now(),
         previewUpdatedAt: Date.now(),
-        canOpenPreview: !!paperTasks.value.find(task => task.id === taskId)?.previewMarkdown,
-        error: data.message,
+        canOpenPreview: !!currentTask?.previewMarkdown,
+        error: friendlyError(data.message),
+        errorPhase,
+        cancelledPhase: '',
+        lastPhase: errorPhase,
       })
       break
+    }
+    case 'itemCancelled': {
+      const cancelledPhase = data.phase || currentTask?.lastPhase || 'queued'
+      updateTask(taskId, {
+        status: 'cancelled',
+        message: '',
+        elapsedMs: data.elapsedMs || data.elapsed_ms || 0,
+        endedAt: Date.now(),
+        previewUpdatedAt: Date.now(),
+        canOpenPreview: !!currentTask?.previewMarkdown,
+        error: '',
+        errorPhase: '',
+        cancelledPhase,
+        lastPhase: cancelledPhase,
+      })
+      break
+    }
     case 'batchFinished':
       showToast(t('papers.batchFinished', { completed: data.completed, failed: data.failed }))
       break
@@ -329,6 +401,9 @@ export function retryPaperTask(id) {
     status: 'queued',
     message: '',
     error: '',
+    lastPhase: 'queued',
+    errorPhase: '',
+    cancelledPhase: '',
     elapsedMs: 0,
     startedAt: null,
     endedAt: null,
@@ -344,7 +419,38 @@ export function retryPaperTask(id) {
   }
 }
 
+export async function cancelPaperTask(id) {
+  const task = getTaskById(id)
+  if (!task || isTerminalStatus(task.status) || task.status === 'cancelling') return
+
+  const snapshot = {
+    status: task.status,
+    message: task.message,
+    error: task.error,
+    lastPhase: task.lastPhase,
+    errorPhase: task.errorPhase,
+    cancelledPhase: task.cancelledPhase,
+  }
+
+  updateTask(id, {
+    status: 'cancelling',
+    message: t('papers.phaseCancelling'),
+    error: '',
+    errorPhase: '',
+    cancelledPhase: '',
+  })
+
+  try {
+    await stopPaperReview(task.path)
+  } catch (err) {
+    updateTask(id, snapshot)
+    showToast(t('papers.cancelFailed') + ': ' + friendlyError(err))
+  }
+}
+
 export function removePaperTask(id) {
+  const task = getTaskById(id)
+  if (!task || !isTerminalStatus(task.status)) return
   if (currentPaperDetailId.value === id) {
     currentPaperDetailId.value = null
     currentPage.value = 'papers'

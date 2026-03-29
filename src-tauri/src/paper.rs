@@ -6,11 +6,21 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
+use tokio::sync::{Semaphore, watch};
 
 const PAPER_CONCURRENCY: usize = 3;
 const FYLA_META_MARKER: &str = "<<<FYLA_META>>>";
 const FYLA_MARKDOWN_MARKER: &str = "<<<FYLA_MARKDOWN>>>";
+const STOPPED_REASON: &str = "__FYLA_PAPER_REVIEW_STOPPED__";
+
+fn paper_review_cancel_registry()
+-> &'static Mutex<std::collections::HashMap<String, watch::Sender<bool>>> {
+    static REGISTRY: OnceLock<Mutex<std::collections::HashMap<String, watch::Sender<bool>>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "event", content = "data")]
@@ -53,7 +63,15 @@ pub enum PaperStreamEvent {
     ItemError {
         source_path: String,
         file_name: String,
+        phase: String,
         message: String,
+        elapsed_ms: u64,
+    },
+    #[serde(rename_all = "camelCase")]
+    ItemCancelled {
+        source_path: String,
+        file_name: String,
+        phase: String,
         elapsed_ms: u64,
     },
     #[serde(rename_all = "camelCase")]
@@ -144,7 +162,13 @@ pub async fn generate_reviews_stream(
 ) -> Result<(), String> {
     let runtime_config = paper_runtime_config(&config);
     let project_name = normalize_optional_project(project_name);
+    let registered_paths = paths.clone();
     let total = paths.len();
+    let semaphore = Arc::new(Semaphore::new(PAPER_CONCURRENCY));
+
+    for path in &registered_paths {
+        register_review_cancel(path);
+    }
 
     let mut completed = 0usize;
     let mut failed = 0usize;
@@ -152,15 +176,24 @@ pub async fn generate_reviews_stream(
         let config = runtime_config.clone();
         let on_event = on_event.clone();
         let project_name = project_name.clone();
-        async move { review_single(path, config, project_name, on_event).await }
+        let semaphore = semaphore.clone();
+        async move { review_single(path, config, project_name, on_event, semaphore).await }
     }))
-    .buffer_unordered(PAPER_CONCURRENCY);
+    .buffer_unordered(total.max(1));
 
     while let Some(result) = tasks.next().await {
         match result {
             Ok(_) => completed += 1,
-            Err(_) => failed += 1,
+            Err(err) => {
+                if !is_review_stopped_error(&err) {
+                    failed += 1;
+                }
+            }
         }
+    }
+
+    for path in registered_paths {
+        clear_review_cancel(&path);
     }
 
     let _ = on_event.send(PaperStreamEvent::BatchFinished {
@@ -176,6 +209,7 @@ async fn review_single(
     config: AppConfig,
     project_name: Option<String>,
     on_event: tauri::ipc::Channel<PaperStreamEvent>,
+    semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let started_at = Instant::now();
     let file_name = Path::new(&path)
@@ -183,6 +217,34 @@ async fn review_single(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
+    let mut cancel_rx = subscribe_review_cancel(&path);
+
+    if *cancel_rx.borrow() {
+        return send_cancelled(path, file_name, "queued".into(), 0, on_event);
+    }
+
+    let _permit = tokio::select! {
+        _ = cancel_rx.changed() => {
+            if *cancel_rx.borrow() {
+                return send_cancelled(path, file_name, "queued".into(), 0, on_event);
+            }
+            unreachable!()
+        }
+        permit = semaphore.clone().acquire_owned() => {
+            permit.map_err(|err| anyhow!(err.to_string()))?
+        }
+    };
+
+    if should_cancel(&cancel_rx) {
+        return send_cancelled(
+            path,
+            file_name,
+            "queued".into(),
+            started_at.elapsed().as_millis() as u64,
+            on_event,
+        );
+    }
+
     let _ = on_event.send(PaperStreamEvent::ItemStarted {
         source_path: path.clone(),
         file_name: file_name.clone(),
@@ -195,9 +257,33 @@ async fn review_single(
 
     let extract_path = path.clone();
     let extracted =
-        tokio::task::spawn_blocking(move || pdf::extract_pdf_text_for_paper(&extract_path))
+        match tokio::task::spawn_blocking(move || pdf::extract_pdf_text_for_paper(&extract_path))
             .await
-            .map_err(|err| anyhow!(err.to_string()))??;
+            .map_err(|err| anyhow!(err.to_string()))
+            .and_then(|value| value)
+        {
+            Ok(value) => value,
+            Err(err) => {
+                return send_error(
+                    path,
+                    file_name,
+                    "extracting".into(),
+                    err.to_string(),
+                    started_at.elapsed().as_millis() as u64,
+                    on_event,
+                );
+            }
+        };
+
+    if should_cancel(&cancel_rx) {
+        return send_cancelled(
+            path,
+            file_name,
+            "extracting".into(),
+            started_at.elapsed().as_millis() as u64,
+            on_event,
+        );
+    }
 
     let _ = on_event.send(PaperStreamEvent::ItemPhaseChanged {
         source_path: path.clone(),
@@ -212,30 +298,64 @@ async fn review_single(
     let paper_text = trim_references_for_prompt(&extracted.text);
     let prompt = build_review_prompt(&file_name, &paper_text);
     let mut preview = PreviewAccumulator::default();
-    let response = call_review_model_stream(&config, &file_name, &prompt, |delta| {
-        let update = preview.push(delta);
-        if update.ready {
-            let _ = on_event.send(PaperStreamEvent::ItemPreviewReady {
-                source_path: path.clone(),
-                preview_chars: update.preview_chars,
-                preview_meta: update.preview_meta,
-            });
+    let response =
+        call_review_model_stream(&config, &file_name, &prompt, &mut cancel_rx, |delta| {
+            let update = preview.push(delta);
+            if update.ready {
+                let _ = on_event.send(PaperStreamEvent::ItemPreviewReady {
+                    source_path: path.clone(),
+                    preview_chars: update.preview_chars,
+                    preview_meta: update.preview_meta,
+                });
+            }
+            if let Some(preview_delta) = update.delta {
+                let _ = on_event.send(PaperStreamEvent::ItemPreviewDelta {
+                    source_path: path.clone(),
+                    delta: preview_delta,
+                    preview_chars: update.preview_chars,
+                });
+            }
+        })
+        .await;
+
+    let response = match response {
+        Ok(value) => value,
+        Err(err) => {
+            if is_review_stopped_error(&err) || should_cancel(&cancel_rx) {
+                return send_cancelled(
+                    path,
+                    file_name,
+                    "generating".into(),
+                    started_at.elapsed().as_millis() as u64,
+                    on_event,
+                );
+            }
+            return send_error(
+                path,
+                file_name,
+                "generating".into(),
+                err.to_string(),
+                started_at.elapsed().as_millis() as u64,
+                on_event,
+            );
         }
-        if let Some(preview_delta) = update.delta {
-            let _ = on_event.send(PaperStreamEvent::ItemPreviewDelta {
-                source_path: path.clone(),
-                delta: preview_delta,
-                preview_chars: update.preview_chars,
-            });
-        }
-    })
-    .await?;
+    };
 
     let _ = on_event.send(PaperStreamEvent::ItemPhaseChanged {
         source_path: path.clone(),
         phase: "saving".into(),
         message: "正在保存 Markdown".into(),
     });
+
+    if should_cancel(&cancel_rx) {
+        return send_cancelled(
+            path,
+            file_name,
+            "saving".into(),
+            started_at.elapsed().as_millis() as u64,
+            on_event,
+        );
+    }
 
     let parsed = response;
     let save_root = effective_archive_root(&config);
@@ -245,6 +365,7 @@ async fn review_single(
         return send_error(
             path,
             file_name,
+            "saving".into(),
             "模型返回了空的论文解读内容".into(),
             started_at.elapsed().as_millis() as u64,
             on_event,
@@ -253,9 +374,23 @@ async fn review_single(
 
     let save_path = save_plan.path.clone();
     let save_markdown = markdown.clone();
-    tokio::task::spawn_blocking(move || save_review(&save_path, &save_markdown))
+    match tokio::task::spawn_blocking(move || save_review(&save_path, &save_markdown))
         .await
-        .map_err(|err| anyhow!(err.to_string()))??;
+        .map_err(|err| anyhow!(err.to_string()))
+        .and_then(|value| value)
+    {
+        Ok(_) => {}
+        Err(err) => {
+            return send_error(
+                path,
+                file_name,
+                "saving".into(),
+                err.to_string(),
+                started_at.elapsed().as_millis() as u64,
+                on_event,
+            );
+        }
+    }
 
     let result = PaperReviewResult {
         source_path: path.clone(),
@@ -271,6 +406,7 @@ async fn review_single(
         extraction_warning: merge_warnings(extracted.warning, parsed.parse_warning),
     };
 
+    clear_review_cancel(&path);
     let _ = on_event.send(PaperStreamEvent::ItemDone {
         source_path: path,
         file_name,
@@ -282,31 +418,54 @@ async fn review_single(
 fn send_error(
     path: String,
     file_name: String,
+    phase: String,
     message: String,
     elapsed_ms: u64,
     on_event: tauri::ipc::Channel<PaperStreamEvent>,
 ) -> Result<()> {
+    clear_review_cancel(&path);
     let _ = on_event.send(PaperStreamEvent::ItemError {
         source_path: path,
         file_name,
+        phase,
         message: message.clone(),
         elapsed_ms,
     });
     Err(anyhow!(message))
 }
 
+fn send_cancelled(
+    path: String,
+    file_name: String,
+    phase: String,
+    elapsed_ms: u64,
+    on_event: tauri::ipc::Channel<PaperStreamEvent>,
+) -> Result<()> {
+    clear_review_cancel(&path);
+    let _ = on_event.send(PaperStreamEvent::ItemCancelled {
+        source_path: path,
+        file_name,
+        phase,
+        elapsed_ms,
+    });
+    Err(anyhow!(STOPPED_REASON))
+}
+
 async fn call_review_model_stream<F>(
     config: &AppConfig,
     file_name: &str,
     prompt: &str,
+    cancel_rx: &mut watch::Receiver<bool>,
     mut on_delta: F,
 ) -> Result<ParsedPaperReview>
 where
     F: FnMut(&str),
 {
     match config.provider.as_str() {
-        "openai" => call_openai_review_stream(config, file_name, prompt, &mut on_delta).await,
-        _ => call_ollama_review_stream(config, file_name, prompt, &mut on_delta).await,
+        "openai" => {
+            call_openai_review_stream(config, file_name, prompt, cancel_rx, &mut on_delta).await
+        }
+        _ => call_ollama_review_stream(config, file_name, prompt, cancel_rx, &mut on_delta).await,
     }
 }
 
@@ -314,6 +473,7 @@ async fn call_openai_review_stream<F>(
     config: &AppConfig,
     file_name: &str,
     prompt: &str,
+    cancel_rx: &mut watch::Receiver<bool>,
     on_delta: &mut F,
 ) -> Result<ParsedPaperReview>
 where
@@ -347,7 +507,17 @@ where
     let mut buffer = String::new();
     let mut stream = resp.bytes_stream();
 
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            _ = cancel_rx.changed() => {
+                if *cancel_rx.borrow() {
+                    return Err(anyhow!(STOPPED_REASON));
+                }
+                continue;
+            }
+            next = stream.next() => next,
+        };
+        let Some(chunk) = chunk else { break };
         let chunk = chunk?;
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
@@ -379,6 +549,7 @@ async fn call_ollama_review_stream<F>(
     config: &AppConfig,
     file_name: &str,
     prompt: &str,
+    cancel_rx: &mut watch::Receiver<bool>,
     on_delta: &mut F,
 ) -> Result<ParsedPaperReview>
 where
@@ -412,7 +583,17 @@ where
     let mut buffer = String::new();
     let mut stream = resp.bytes_stream();
 
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            _ = cancel_rx.changed() => {
+                if *cancel_rx.borrow() {
+                    return Err(anyhow!(STOPPED_REASON));
+                }
+                continue;
+            }
+            next = stream.next() => next,
+        };
+        let Some(chunk) = chunk else { break };
         let chunk = chunk?;
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
@@ -663,6 +844,60 @@ fn merge_warnings(base: Option<String>, extra: Option<String>) -> Option<String>
         (None, Some(b)) => Some(b),
         (None, None) => None,
     }
+}
+
+pub fn stop_review(source_path: String) -> Result<()> {
+    trigger_review_stop(&source_path);
+    Ok(())
+}
+
+fn register_review_cancel(path: &str) {
+    let (sender, _receiver) = watch::channel(false);
+    paper_review_cancel_registry()
+        .lock()
+        .unwrap()
+        .insert(path.to_string(), sender);
+}
+
+fn subscribe_review_cancel(path: &str) -> watch::Receiver<bool> {
+    if let Some(sender) = paper_review_cancel_registry()
+        .lock()
+        .unwrap()
+        .get(path)
+        .cloned()
+    {
+        sender.subscribe()
+    } else {
+        let (sender, receiver) = watch::channel(false);
+        paper_review_cancel_registry()
+            .lock()
+            .unwrap()
+            .insert(path.to_string(), sender);
+        receiver
+    }
+}
+
+fn trigger_review_stop(path: &str) {
+    if let Some(sender) = paper_review_cancel_registry()
+        .lock()
+        .unwrap()
+        .get(path)
+        .cloned()
+    {
+        let _ = sender.send(true);
+    }
+}
+
+fn clear_review_cancel(path: &str) {
+    paper_review_cancel_registry().lock().unwrap().remove(path);
+}
+
+fn should_cancel(cancel_rx: &watch::Receiver<bool>) -> bool {
+    *cancel_rx.borrow()
+}
+
+fn is_review_stopped_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains(STOPPED_REASON)
 }
 
 fn build_review_prompt(file_name: &str, text: &str) -> String {

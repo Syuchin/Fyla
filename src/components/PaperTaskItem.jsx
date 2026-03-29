@@ -1,18 +1,21 @@
 import { memo } from 'preact/compat'
 import { copyText, revealInFinder } from '../lib/tauri.js'
-import { openPaperDetail, removePaperTask, retryPaperTask } from '../lib/paperQueue.js'
+import { cancelPaperTask, openPaperDetail, removePaperTask, retryPaperTask } from '../lib/paperQueue.js'
 import { showToast } from '../lib/store.js'
 import { t } from '../lib/i18n.js'
 import { formatCompactPaperChars, formatExactPaperChars, hasPaperCharCount } from '../lib/paperChars.js'
 import { PaperRowActionsMenu } from './PaperRowActionsMenu.jsx'
 
-const PROCESSING = new Set(['extracting', 'generating', 'saving'])
+const PROCESSING = new Set(['extracting', 'generating', 'saving', 'cancelling'])
 
 export const PaperTaskItem = memo(function PaperTaskItem({ task, now, hasProcessingTasks }) {
   const isDone = task.status === 'done'
   const isError = task.status === 'error'
+  const isCancelled = task.status === 'cancelled'
   const isQueued = task.status === 'queued'
+  const isCancelling = task.status === 'cancelling'
   const isProcessing = PROCESSING.has(task.status)
+  const isActive = isQueued || isProcessing
   const canViewPreview = !!task.canOpenPreview
   const savedPath = task.result?.savedPath
   const extractorLabel = task.result?.extractor || ''
@@ -22,6 +25,7 @@ export const PaperTaskItem = memo(function PaperTaskItem({ task, now, hasProcess
   const charCount = getTaskCharCount(task)
   const compactCharCount = formatCompactPaperChars(charCount)
   const charCountTitle = formatExactPaperChars(charCount)
+  const issueText = getIssueText(task)
 
   async function handleCopy() {
     if (!task.result?.markdown) return
@@ -39,11 +43,7 @@ export const PaperTaskItem = memo(function PaperTaskItem({ task, now, hasProcess
     { id: 'remove', label: t('papers.remove'), danger: true, onClick: () => removePaperTask(task.id) },
   ].filter(Boolean)
 
-  const previewMenuItems = [
-    { id: 'remove', label: t('papers.remove'), danger: true, onClick: () => removePaperTask(task.id) },
-  ]
-
-  const errorMenuItems = [
+  const retryMenuItems = [
     canViewPreview ? { id: 'view', label: t('papers.view'), onClick: () => openPaperDetail(task.id) } : null,
     { id: 'remove', label: t('papers.remove'), danger: true, onClick: () => removePaperTask(task.id) },
   ].filter(Boolean)
@@ -84,8 +84,8 @@ export const PaperTaskItem = memo(function PaperTaskItem({ task, now, hasProcess
           <div class="paper-task-preview">{previewSnippet}</div>
         )}
 
-        {isError && task.error && (
-          <div class="paper-task-error" title={task.error}>{task.error}</div>
+        {(isError || isCancelled) && issueText && (
+          <div class={`paper-task-error ${isCancelled ? 'paper-task-error-cancelled' : ''}`} title={issueText}>{issueText}</div>
         )}
       </div>
 
@@ -98,24 +98,40 @@ export const PaperTaskItem = memo(function PaperTaskItem({ task, now, hasProcess
             <PaperRowActionsMenu items={doneMenuItems} />
           </>
         )}
-        {!isDone && !isError && canViewPreview && (
+        {isActive && canViewPreview && (
           <>
             <button type="button" class="btn btn-secondary paper-action-btn paper-action-btn-secondary paper-row-action-btn paper-row-action-btn-primary paper-task-primary-action" onClick={() => openPaperDetail(task.id)}>
               {t('papers.view')}
             </button>
-            <PaperRowActionsMenu items={previewMenuItems} />
+            <button
+              type="button"
+              class="btn btn-secondary paper-action-btn paper-action-btn-secondary paper-row-action-btn paper-row-action-btn-primary paper-task-primary-action"
+              disabled={isCancelling}
+              onClick={() => cancelPaperTask(task.id)}
+            >
+              {isCancelling ? t('papers.phaseCancelling') : t('papers.cancelTask')}
+            </button>
           </>
         )}
-        {isError && (
+        {isActive && !canViewPreview && (
+          <>
+            <button
+              type="button"
+              class="btn btn-secondary paper-action-btn paper-action-btn-secondary paper-row-action-btn paper-row-action-btn-primary paper-task-primary-action"
+              disabled={isCancelling}
+              onClick={() => cancelPaperTask(task.id)}
+            >
+              {isCancelling ? t('papers.phaseCancelling') : t('papers.cancelTask')}
+            </button>
+          </>
+        )}
+        {(isError || isCancelled) && (
           <>
             <button type="button" class="btn btn-secondary paper-action-btn paper-action-btn-secondary paper-row-action-btn paper-row-action-btn-primary paper-task-primary-action" onClick={() => retryPaperTask(task.id)}>
               {t('task.retry')}
             </button>
-            <PaperRowActionsMenu items={errorMenuItems} />
+            <PaperRowActionsMenu items={retryMenuItems} />
           </>
-        )}
-        {!isDone && !isError && !canViewPreview && (
-          <PaperRowActionsMenu items={previewMenuItems} />
         )}
       </div>
     </div>
@@ -128,8 +144,10 @@ function statusLabel(task) {
     case 'extracting': return t('papers.phaseExtracting')
     case 'generating': return t('papers.phaseGenerating')
     case 'saving': return t('papers.phaseSaving')
+    case 'cancelling': return t('papers.phaseCancelling')
     case 'done': return t('papers.phaseDone')
     case 'error': return t('papers.phaseError')
+    case 'cancelled': return t('papers.phaseCancelled')
     default: return task.message || task.status
   }
 }
@@ -163,4 +181,32 @@ function getTaskCharCount(task) {
   if (task.result?.markdown) return task.result.markdown.length
   if (task.previewChars) return task.previewChars
   return 0
+}
+
+function getIssueText(task) {
+  if (task.status === 'error') {
+    const phase = getPhaseLabel(task.errorPhase || task.lastPhase)
+    const prefix = phase ? t('papers.failedAtPhase', { phase }) : t('papers.phaseError')
+    return task.error ? `${prefix}: ${task.error}` : prefix
+  }
+  if (task.status === 'cancelled') {
+    const phase = getPhaseLabel(task.cancelledPhase || task.lastPhase)
+    if (!phase) return t('papers.phaseCancelled')
+    return t('papers.cancelledAtPhase', { phase })
+  }
+  return ''
+}
+
+function getPhaseLabel(phase) {
+  switch (phase) {
+    case 'queued': return t('papers.phaseQueued')
+    case 'extracting': return t('papers.phaseExtracting')
+    case 'generating': return t('papers.phaseGenerating')
+    case 'saving': return t('papers.phaseSaving')
+    case 'cancelling': return t('papers.phaseCancelling')
+    case 'done': return t('papers.phaseDone')
+    case 'error': return t('papers.phaseError')
+    case 'cancelled': return t('papers.phaseCancelled')
+    default: return phase || ''
+  }
 }

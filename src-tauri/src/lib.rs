@@ -419,6 +419,11 @@ async fn generate_paper_reviews_stream(
 }
 
 #[tauri::command]
+fn stop_paper_review(source_path: String) -> Result<(), String> {
+    paper::stop_review(source_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn get_paper_embedding_status(
     config: AppConfig,
 ) -> Result<embedding::PaperEmbeddingStatus, String> {
@@ -699,6 +704,7 @@ pub fn run() {
             get_paper_embedding_status,
             test_paper_embedding_connection,
             generate_paper_reviews_stream,
+            stop_paper_review,
             prepare_paper_chat_session,
             create_paper_chat_session,
             get_paper_chat_history,

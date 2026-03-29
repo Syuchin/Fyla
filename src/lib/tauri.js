@@ -119,6 +119,10 @@ export async function generatePaperReviewsStream(paths, config, projectName, onE
   await invoke('generate_paper_reviews_stream', { paths, config, projectName, onEvent: channel })
 }
 
+export async function stopPaperReview(sourcePath) {
+  return await invoke('stop_paper_review', { sourcePath })
+}
+
 export async function getHistory() {
   return await invoke('get_history')
 }
