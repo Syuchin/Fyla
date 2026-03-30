@@ -2,11 +2,10 @@ use crate::config::{
     self, AppConfig, PaperChatAttachment, PaperChatCitation, PaperChatMessageEntry,
     PaperChatSessionEntry,
 };
-use crate::{embedding, llm, pdf};
+use crate::{embedding, llm, pdf, streaming};
 use anyhow::{Context, Result, anyhow};
 use base64::Engine;
 use futures_util::StreamExt;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -657,7 +656,7 @@ async fn stream_paper_chat_reply_inner(
     );
 
     let mut accumulator = ChatStreamAccumulator::default();
-    let raw = call_chat_model_stream(&runtime_config, &messages, &mut cancel_rx, |delta| {
+    let raw = call_chat_model_stream(&runtime_config, &session_id, &messages, &mut cancel_rx, |delta| {
         if let Some(answer_delta) = accumulator.push(delta) {
             let _ = on_event.send(PaperChatStreamEvent::AnswerDelta {
                 session_id: session_id.clone(),
@@ -1676,6 +1675,7 @@ fn build_chat_messages(
 
 async fn call_chat_model_stream<F>(
     config: &AppConfig,
+    trace_item: &str,
     messages: &[ChatMessage],
     cancel_rx: &mut watch::Receiver<bool>,
     mut on_delta: F,
@@ -1684,13 +1684,18 @@ where
     F: FnMut(&str),
 {
     match config.provider.as_str() {
-        "openai" => call_openai_chat_stream(config, messages, cancel_rx, &mut on_delta).await,
-        _ => call_ollama_chat_stream(config, messages, cancel_rx, &mut on_delta).await,
+        "openai" => {
+            call_openai_chat_stream(config, trace_item, messages, cancel_rx, &mut on_delta).await
+        }
+        _ => {
+            call_ollama_chat_stream(config, trace_item, messages, cancel_rx, &mut on_delta).await
+        }
     }
 }
 
 async fn call_openai_chat_stream<F>(
     config: &AppConfig,
+    trace_item: &str,
     messages: &[ChatMessage],
     cancel_rx: &mut watch::Receiver<bool>,
     on_delta: &mut F,
@@ -1699,22 +1704,42 @@ where
     F: FnMut(&str),
 {
     let base = config.openai_base_url.trim_end_matches('/');
+    let input_chars = messages
+        .iter()
+        .map(|message| message.content.chars().count())
+        .sum::<usize>();
+    let mut trace = streaming::StreamTrace::new(
+        "paper-chat",
+        "openai",
+        &config.openai_model,
+        base,
+        trace_item,
+        input_chars,
+    );
     let url = format!("{}/chat/completions", base);
     let body = json!({
         "model": config.openai_model,
         "messages": messages,
         "stream": true
     });
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
-        .build()?;
+    let client = streaming::build_streaming_http_client()?;
     let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", config.openai_key))
         .json(&body)
         .send()
         .await
-        .map_err(|e| anyhow!("无法连接 API ({}): {}", base, e))?;
+        .map_err(|e| {
+            if e.is_connect() {
+                anyhow!("无法连接 API ({}): {}", base, e)
+            } else if streaming::is_timeout_like_error(&e) {
+                let message = streaming::stream_idle_timeout_message();
+                trace.log_error(&e, message);
+                anyhow!(message)
+            } else {
+                anyhow!("API 网络错误 ({}): {}", base, e)
+            }
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1738,7 +1763,15 @@ where
             next = stream.next() => next,
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let classified = streaming::classify_stream_error(&err);
+                let user_message = classified.to_string();
+                trace.log_error(&err, &user_message);
+                return Err(classified);
+            }
+        };
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
 
@@ -1755,6 +1788,7 @@ where
                 let value: Value = serde_json::from_str(payload)?;
                 let delta = extract_openai_delta_text(&value);
                 if !delta.is_empty() {
+                    trace.record_delta(&delta);
                     raw.push_str(&delta);
                     if let Some(answer_delta) = accumulator.push(&delta) {
                         on_delta(&answer_delta);
@@ -1764,11 +1798,13 @@ where
         }
     }
 
+    trace.log_complete();
     Ok(raw)
 }
 
 async fn call_ollama_chat_stream<F>(
     config: &AppConfig,
+    trace_item: &str,
     messages: &[ChatMessage],
     cancel_rx: &mut watch::Receiver<bool>,
     on_delta: &mut F,
@@ -1777,18 +1813,32 @@ where
     F: FnMut(&str),
 {
     let url = format!("{}/api/chat", config.ollama_url.trim_end_matches('/'));
+    let input_chars = messages
+        .iter()
+        .map(|message| message.content.chars().count())
+        .sum::<usize>();
+    let mut trace = streaming::StreamTrace::new(
+        "paper-chat",
+        "ollama",
+        &config.ollama_model,
+        &config.ollama_url,
+        trace_item,
+        input_chars,
+    );
     let body = json!({
         "model": config.ollama_model,
         "messages": messages,
         "stream": true,
         "options": { "num_predict": 4096 }
     });
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
-        .build()?;
+    let client = streaming::build_streaming_http_client()?;
     let resp = client.post(&url).json(&body).send().await.map_err(|e| {
         if e.is_connect() {
             anyhow!("无法连接 Ollama（{}），请确认已启动", config.ollama_url)
+        } else if streaming::is_timeout_like_error(&e) {
+            let message = streaming::stream_idle_timeout_message();
+            trace.log_error(&e, message);
+            anyhow!(message)
         } else {
             anyhow!("Ollama 网络错误: {}", e)
         }
@@ -1816,7 +1866,15 @@ where
             next = stream.next() => next,
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let classified = streaming::classify_stream_error(&err);
+                let user_message = classified.to_string();
+                trace.log_error(&err, &user_message);
+                return Err(classified);
+            }
+        };
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
 
@@ -1828,6 +1886,7 @@ where
             let value: Value = serde_json::from_str(trimmed)?;
             let delta = value["message"]["content"].as_str().unwrap_or_default();
             if !delta.is_empty() {
+                trace.record_delta(delta);
                 raw.push_str(delta);
                 if let Some(answer_delta) = accumulator.push(delta) {
                     on_delta(&answer_delta);
@@ -1836,6 +1895,7 @@ where
         }
     }
 
+    trace.log_complete();
     Ok(raw)
 }
 

@@ -117,6 +117,8 @@
     "cancelled": "cancelled",
     "totalElapsed": "Total elapsed {{time}}",
     "processingBadge": "{{count}} papers processing",
+    "pendingBadge": "{{count}} papers pending",
+    "pendingLabel": "Pending",
     "previewChars": "{{count}} chars generated",
     "charCountExact": "{{count}} chars",
     "livePreview": "Live Preview",
@@ -426,6 +428,9 @@
     "pdfExtractFailed": "Failed to extract PDF content. File may be corrupted or encrypted",
     "emptyFilename": "AI could not extract useful info. Try renaming manually",
     "paperParseFailed": "Failed to parse the paper review result. Check whether the model can return stable JSON",
+    "paperStreamIdleTimeout": "The model stopped returning new content for too long. The streaming output timed out. Please try again",
+    "paperStreamDisconnected": "The model's streaming connection was interrupted. Please try again",
+    "clipboardWriteFailed": "Failed to write to the clipboard. Please try again",
     "invalidExternalUrl": "This link is not allowed to open externally",
     "openExternalFailed": "Failed to open the link in your browser"
   },

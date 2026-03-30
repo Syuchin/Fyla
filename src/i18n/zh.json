@@ -117,6 +117,8 @@
     "cancelled": "已取消",
     "totalElapsed": "累计耗时 {{time}}",
     "processingBadge": "{{count}} 篇论文处理中",
+    "pendingBadge": "{{count}} 篇论文待处理",
+    "pendingLabel": "待处理",
     "previewChars": "已生成 {{count}} 字符",
     "charCountExact": "{{count}} 字",
     "livePreview": "实时预览",
@@ -426,6 +428,9 @@
     "pdfExtractFailed": "PDF 内容提取失败，文件可能已损坏或被加密",
     "emptyFilename": "AI 无法从文档中提取有效信息，请尝试手动命名",
     "paperParseFailed": "论文解读结果解析失败，请检查模型是否支持稳定 JSON 输出",
+    "paperStreamIdleTimeout": "模型长时间没有返回新内容，流式输出已超时，请重试",
+    "paperStreamDisconnected": "模型流式连接中断，请重试",
+    "clipboardWriteFailed": "写入剪贴板失败，请重试",
     "invalidExternalUrl": "当前链接不允许在外部浏览器中打开",
     "openExternalFailed": "在浏览器中打开链接失败"
   },

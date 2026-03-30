@@ -22,7 +22,7 @@ import {
   stopActivePaperChatStream,
 } from '../lib/paperChat.js'
 import { t } from '../lib/i18n.js'
-import { copyText, pickImageFiles, readBinaryFile } from '../lib/tauri.js'
+import { copyText, friendlyError, openExternalUrl, pickImageFiles, readBinaryFile } from '../lib/tauri.js'
 import {
   activePaperChatPaper,
   config,
@@ -36,7 +36,6 @@ import {
   paperSelectionContext,
   showToast,
 } from '../lib/store.js'
-import { friendlyError, openExternalUrl } from '../lib/tauri.js'
 import { renderMarkdownToHtml } from '../lib/renderMarkdown.js'
 
 const INLINE_MENTION_GLOBAL_PATTERN = /\[@([^\]\n]+)\]/g
@@ -1216,7 +1215,7 @@ function MessageBubble({ message, isLastAssistant, onJumpCitation }) {
             <button type="button" class="paper-chat-message-action" title={t('papers.chatUnhelpful')} aria-label={t('papers.chatUnhelpful')} onClick={() => showToast(t('papers.chatUnhelpful'))}>
               <ChatIcon name="unhelpful" />
             </button>
-            <button type="button" class="paper-chat-message-action" title={t('papers.chatCopy')} aria-label={t('papers.chatCopy')} onClick={() => copyText(message.content || '')}>
+            <button type="button" class="paper-chat-message-action" title={t('papers.chatCopy')} aria-label={t('papers.chatCopy')} onClick={() => void handleCopyMessage(message.content || '')}>
               <ChatIcon name="copy" />
             </button>
             {isLastAssistant && (
@@ -1571,6 +1570,15 @@ export function PaperChatDock({
 
   function showVlmDisabledToast() {
     showToast(t('papers.chatImageVlmDisabled'))
+  }
+
+  async function handleCopyMessage(content) {
+    try {
+      await copyText(content || '')
+      showToast(t('papers.copied'))
+    } catch (err) {
+      showToast(t('papers.copyFailed') + ': ' + friendlyError(err))
+    }
   }
 
   function handleRemoveDraftImage(image) {

@@ -1,6 +1,6 @@
 [package]
 name = "fyla"
-version = "1.2.3"
+version = "1.2.4"
 edition = "2024"
 
 [lib]
@@ -26,6 +26,7 @@ zip = "2"
 calamine = "0.33"
 quick-xml = "0.37"
 anyhow = "1"
+arboard = "3"
 dirs = "5"
 libc = "0.2"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }

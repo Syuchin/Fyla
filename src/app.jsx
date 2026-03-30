@@ -155,7 +155,7 @@ export function App() {
 
   const [dragOver, setDragOver] = useState(false)
   const { ready, processing } = stats.value
-  const paperProcessing = paperStats.value.processing
+  const paperPending = paperStats.value.pending
   const pendingCount = ready + processing
   const papersActive = currentPage.value === 'papers' || currentPage.value === 'paper-detail'
 
@@ -231,10 +231,10 @@ export function App() {
               <span class="pending-text">{t('confirm.pendingLabel')}</span>
             </div>
           )}
-          {paperProcessing > 0 && (
-            <div class="pending-badge pending-badge-paper" title={t('papers.processingBadge', { count: paperProcessing })} onClick={() => currentPage.value = 'papers'}>
-              <span class="pending-count">{paperProcessing}</span>
-              <span class="pending-text">{t('nav.papers')}</span>
+          {paperPending > 0 && (
+            <div class="pending-badge pending-badge-paper" title={t('papers.pendingBadge', { count: paperPending })} onClick={() => currentPage.value = 'papers'}>
+              <span class="pending-count">{paperPending}</span>
+              <span class="pending-text">{t('papers.pendingLabel')}</span>
             </div>
           )}
           {isWatching.value && (

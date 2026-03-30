@@ -1,5 +1,5 @@
 import { memo } from 'preact/compat'
-import { copyText, revealInFinder } from '../lib/tauri.js'
+import { copyText, friendlyError, revealInFinder } from '../lib/tauri.js'
 import { cancelPaperTask, openPaperDetail, removePaperTask, retryPaperTask } from '../lib/paperQueue.js'
 import { showToast } from '../lib/store.js'
 import { t } from '../lib/i18n.js'
@@ -33,7 +33,7 @@ export const PaperTaskItem = memo(function PaperTaskItem({ task, now, hasProcess
       await copyText(task.result.markdown)
       showToast(t('papers.copied'))
     } catch (err) {
-      showToast(t('papers.copyFailed') + ': ' + String(err))
+      showToast(t('papers.copyFailed') + ': ' + friendlyError(err))
     }
   }
 

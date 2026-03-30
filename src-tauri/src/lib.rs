@@ -9,10 +9,12 @@ mod pdf;
 mod renamer;
 mod scanner;
 mod service;
+mod streaming;
 #[cfg(test)]
 mod test_ocr;
 mod watcher;
 
+use arboard::Clipboard;
 use config::{AppConfig, load_config};
 use renamer::{FileInfo, RenameResult, RenameTask};
 use std::sync::Mutex;
@@ -595,6 +597,14 @@ fn set_badge_count(app: tauri::AppHandle, count: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn write_clipboard_text(text: String) -> Result<(), String> {
+    let mut clipboard = Clipboard::new().map_err(|e| format!("写入剪贴板失败: {}", e))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("写入剪贴板失败: {}", e))
+}
+
+#[tauri::command]
 fn set_autostart(enabled: bool) -> Result<(), String> {
     autostart::set_autostart(enabled)
 }
@@ -722,6 +732,7 @@ pub fn run() {
             start_watch,
             stop_watch,
             set_badge_count,
+            write_clipboard_text,
             set_autostart,
             is_autostart_enabled,
             scanner::scan_paths,

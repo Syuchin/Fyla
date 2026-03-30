@@ -199,6 +199,10 @@ export async function setBadgeCount(count) {
   return await invoke('set_badge_count', { count })
 }
 
+export async function writeClipboardText(text) {
+  return await invoke('write_clipboard_text', { text })
+}
+
 export async function openPaperChatWindow(payload) {
   let win = await WebviewWindow.getByLabel('paper-chat')
   if (!win) {
@@ -274,25 +278,55 @@ export async function openExternalUrl(input) {
 }
 
 export async function copyText(text) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
+  const value = String(text ?? '')
+  let lastError = null
+
+  try {
+    await writeClipboardText(value)
     return
+  } catch (err) {
+    lastError = err
+  }
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value)
+      return
+    } catch (err) {
+      lastError = err
+    }
   }
 
   const textarea = document.createElement('textarea')
-  textarea.value = text
+  textarea.value = value
   textarea.setAttribute('readonly', '')
   textarea.style.position = 'fixed'
   textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
   document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  document.body.removeChild(textarea)
+
+  try {
+    textarea.focus()
+    textarea.select()
+    textarea.setSelectionRange(0, textarea.value.length)
+    if (document.execCommand('copy')) {
+      return
+    }
+    lastError = lastError || new Error(t('errors.clipboardWriteFailed'))
+  } catch (err) {
+    lastError = err
+  } finally {
+    document.body.removeChild(textarea)
+  }
+
+  throw lastError || new Error(t('errors.clipboardWriteFailed'))
 }
 
 const errorMap = [
   [/Connection refused|连接被拒绝/i, 'errors.ollamaNotRunning'],
   [/无法连接 Ollama/i, 'errors.ollamaConnFailed'],
+  [/模型长时间没有返回新内容|流式输出已超时|stream output timed out|no new content/i, 'errors.paperStreamIdleTimeout'],
+  [/模型流式连接中断|stream connection interrupted|error decoding response body/i, 'errors.paperStreamDisconnected'],
   [/timeout|超时/i, 'errors.timeout'],
   [/API Key 无效/i, 'errors.invalidApiKey'],
   [/401|Unauthorized/i, 'errors.unauthorized'],
@@ -304,6 +338,7 @@ const errorMap = [
   [/PDF.*extract|提取.*失败/i, 'errors.pdfExtractFailed'],
   [/AI 返回了空文件名|empty.*filename/i, 'errors.emptyFilename'],
   [/论文解读结果解析失败/i, 'errors.paperParseFailed'],
+  [/NotAllowedError|Write permission denied|clipboard.*denied|写入剪贴板失败/i, 'errors.clipboardWriteFailed'],
 ]
 
 export function friendlyError(err) {

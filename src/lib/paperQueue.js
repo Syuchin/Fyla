@@ -14,10 +14,13 @@ let paperHistoryHydratePromise = null
 
 export const paperStats = computed(() => {
   const list = paperTasks.value
+  const queued = list.filter(task => task.status === 'queued').length
+  const processing = list.filter(task => ['extracting', 'generating', 'saving', 'cancelling'].includes(task.status)).length
   return {
     total: list.length,
-    queued: list.filter(task => task.status === 'queued').length,
-    processing: list.filter(task => ['extracting', 'generating', 'saving', 'cancelling'].includes(task.status)).length,
+    queued,
+    processing,
+    pending: queued + processing,
     done: list.filter(task => task.status === 'done').length,
     error: list.filter(task => task.status === 'error').length,
     cancelled: list.filter(task => task.status === 'cancelled').length,

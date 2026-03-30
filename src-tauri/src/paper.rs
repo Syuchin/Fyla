@@ -1,8 +1,7 @@
 use crate::config::AppConfig;
-use crate::{llm, pdf};
+use crate::{llm, pdf, streaming};
 use anyhow::{Result, anyhow};
 use futures_util::stream::{self, StreamExt};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -303,6 +302,28 @@ async fn review_single(
         &paper_text,
         &config.paper_review_prompt_template,
     );
+    let (model_name, host) = match config.provider.as_str() {
+        "openai" => (
+            config.openai_model.as_str(),
+            streaming::host_for_logging(&config.openai_base_url),
+        ),
+        _ => (
+            config.ollama_model.as_str(),
+            streaming::host_for_logging(&config.ollama_url),
+        ),
+    };
+    eprintln!(
+        "[paper-perf] review_single.input file={} path={} extractor={} extractedChars={} reviewChars={} promptChars={} provider={} model={} host={}",
+        file_name,
+        path,
+        extracted.extractor,
+        extracted.text.chars().count(),
+        paper_text.chars().count(),
+        prompt.chars().count(),
+        config.provider,
+        model_name,
+        host
+    );
     let mut preview = PreviewAccumulator::default();
     let response =
         call_review_model_stream(&config, &file_name, &prompt, &mut cancel_rx, |delta| {
@@ -486,22 +507,38 @@ where
     F: FnMut(&str),
 {
     let base = config.openai_base_url.trim_end_matches('/');
+    let mut trace = streaming::StreamTrace::new(
+        "paper-review",
+        "openai",
+        &config.openai_model,
+        base,
+        file_name,
+        prompt.chars().count(),
+    );
     let url = format!("{}/chat/completions", base);
     let body = json!({
         "model": config.openai_model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": true
     });
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
-        .build()?;
+    let client = streaming::build_streaming_http_client()?;
     let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", config.openai_key))
         .json(&body)
         .send()
         .await
-        .map_err(|e| anyhow!("无法连接 API ({}): {}", base, e))?;
+        .map_err(|e| {
+            if e.is_connect() {
+                anyhow!("无法连接 API ({}): {}", base, e)
+            } else if streaming::is_timeout_like_error(&e) {
+                let message = streaming::stream_idle_timeout_message();
+                trace.log_error(&e, message);
+                anyhow!(message)
+            } else {
+                anyhow!("API 网络错误 ({}): {}", base, e)
+            }
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -524,7 +561,15 @@ where
             next = stream.next() => next,
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let classified = streaming::classify_stream_error(&err);
+                let user_message = classified.to_string();
+                trace.log_error(&err, &user_message);
+                return Err(classified);
+            }
+        };
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
 
@@ -541,6 +586,7 @@ where
                 let value: Value = serde_json::from_str(payload)?;
                 let delta = extract_openai_delta_text(&value);
                 if !delta.is_empty() {
+                    trace.record_delta(&delta);
                     on_delta(&delta);
                     raw.push_str(&delta);
                 }
@@ -548,6 +594,7 @@ where
         }
     }
 
+    trace.log_complete();
     parse_streamed_review(&raw, file_name)
 }
 
@@ -562,18 +609,28 @@ where
     F: FnMut(&str),
 {
     let url = format!("{}/api/chat", config.ollama_url.trim_end_matches('/'));
+    let mut trace = streaming::StreamTrace::new(
+        "paper-review",
+        "ollama",
+        &config.ollama_model,
+        &config.ollama_url,
+        file_name,
+        prompt.chars().count(),
+    );
     let body = json!({
         "model": config.ollama_model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": true,
         "options": { "num_predict": 8192 }
     });
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
-        .build()?;
+    let client = streaming::build_streaming_http_client()?;
     let resp = client.post(&url).json(&body).send().await.map_err(|e| {
         if e.is_connect() {
             anyhow!("无法连接 Ollama（{}），请确认已启动", config.ollama_url)
+        } else if streaming::is_timeout_like_error(&e) {
+            let message = streaming::stream_idle_timeout_message();
+            trace.log_error(&e, message);
+            anyhow!(message)
         } else {
             anyhow!("Ollama 网络错误: {}", e)
         }
@@ -600,7 +657,15 @@ where
             next = stream.next() => next,
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let classified = streaming::classify_stream_error(&err);
+                let user_message = classified.to_string();
+                trace.log_error(&err, &user_message);
+                return Err(classified);
+            }
+        };
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
 
@@ -612,12 +677,14 @@ where
             let value: Value = serde_json::from_str(trimmed)?;
             let delta = value["message"]["content"].as_str().unwrap_or_default();
             if !delta.is_empty() {
+                trace.record_delta(delta);
                 on_delta(delta);
                 raw.push_str(delta);
             }
         }
     }
 
+    trace.log_complete();
     parse_streamed_review(&raw, file_name)
 }
 

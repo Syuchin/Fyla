@@ -690,7 +690,8 @@ function handleChatStreamEvent(sessionId, message) {
       }))
       syncCurrentPaperSummaryFromStoredSession(sessionId)
       break
-    case 'answerError':
+    case 'answerError': {
+      const errorMessage = friendlyError(data.message || t('papers.chatUnknownError'))
       patchSession(sessionId, session => ({
         ...session,
         status: 'idle',
@@ -698,13 +699,14 @@ function handleChatStreamEvent(sessionId, message) {
         updatedAt: new Date().toISOString(),
         messages: session.messages.map(item =>
           item.id === data.messageId
-            ? { ...item, content: data.message || item.content, status: 'error' }
+            ? { ...item, content: errorMessage || item.content, status: 'error' }
             : item
         ),
       }))
       syncCurrentPaperSummaryFromStoredSession(sessionId)
-      showToast(`${t('papers.chatSendFailed')}: ${data.message || t('papers.chatUnknownError')}`)
+      showToast(`${t('papers.chatSendFailed')}: ${errorMessage}`)
       break
+    }
   }
 }
 
